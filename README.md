@@ -2,7 +2,7 @@ Based on the example from https://github.com/WebAssembly/threads/blob/main/propo
 
 # How to start
 
-- build the .wasm from the .wat by running `./build.sh`
+- build the .wasm from the .wat by running `./build.sh` (wat2wasm is from https://github.com/WebAssembly/wabt)
 - start the server with `./server_start.sh`
 - open the web page at `http://localhost:8085/`
 - view logs in the browser dev console
