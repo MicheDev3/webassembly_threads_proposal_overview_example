@@ -1,0 +1,1 @@
+wat2wasm --enable-threads wasm/example.wat -o wasm/example.wasm
