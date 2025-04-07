@@ -1,34 +1,56 @@
 console.log("jai wasm thread example");
 
+const atomicsUri = '/public/atomics.wasm';
+const exampleUri = '/public/example.wasm';
 
-const wasmUrl = '/wasm/example.wasm';
+const sharedMemory = new WebAssembly.Memory({initial: 1, maximum: 1, shared: true});
 
-async function loadWasm(){
-	if(window.crossOriginIsolated==false){
-		console.error('window.crossOriginIsolated return false. Start the server with ./server_start.sh');
-	}
+async function main(modules)
+{
+	const atomics = modules[0];
+	const example = modules[1];
 	
-
-	const response = await fetch(wasmUrl);
-	const moduleBytes = await response.arrayBuffer();
-
-	const memory = new WebAssembly.Memory({initial: 1, maximum: 1, shared: true});
+	console.log("Atomics:", atomics);
+	console.log("Example:", example);
+	
 	const worker = new Worker('/js/worker.js');
-	const mutexAddr = 0;
-	worker.postMessage(memory);
-	const imports = {env: {memory: memory}};
+	worker.postMessage(sharedMemory);
 	
-	const module = await WebAssembly.instantiate(moduleBytes, imports);
-	console.log(module);
-	const instance = module.instance;
-	const tryLockResult = instance.exports.tryLockMutex(mutexAddr);
-	if (tryLockResult) {
+	const mutexAddr = 0;
+	const tryLockResult = atomics.instance.exports.tryLockMutex(mutexAddr);
+	if (tryLockResult) 
+	{
 		console.log('✅ mutex is locked in main thread');
-		instance.exports.unlockMutex(mutexAddr);
+		atomics.instance.exports.unlockMutex(mutexAddr);
 		console.log('main: unlocked')
-	} else {
+	} 
+	else
+	{
 		console.log('❌ mutex is NOT locked in main thread');
 	}
+}
+
+async function loadWasm()
+{
+	if(window.crossOriginIsolated==false)
+	{
+		console.error('window.crossOriginIsolated return false. Start the server with ./server_start.sh');
+	}
+		
+	const imports = {env: {memory: sharedMemory}};
+	Promise.all(
+		[
+			WebAssembly.instantiateStreaming(fetch(atomicsUri), imports),
+			WebAssembly.instantiateStreaming(fetch(exampleUri), imports),
+		]
+	)
+	.then(main)
+	.catch(
+		(err) => 
+		{
+			console.error(err);
+		}
+	);
 }
 
 loadWasm();
