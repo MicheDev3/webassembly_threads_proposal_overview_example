@@ -1,51 +1,36 @@
-const atomicsUri = '/public/atomics.wasm';
-const exampleUri = '/public/example.wasm';
+import { atomicsUri, exampleUri, sleep } from "/js/common.js";
 
-async function main(obj)
+async function run(index, modules)
 {
+	const atomics = modules[0];
+	const example = modules[1];
+	
 	const mutexAddr = 0;
-	const lockResult = obj.instance.exports.lockMutex(mutexAddr);
-	console.log('worker thread tryLockMutex result:', lockResult);
+	const lockResult = atomics.instance.exports.lockMutex(mutexAddr);
+	console.log("worker %d thread tryLockMutex result:", index, lockResult);
 	if(lockResult==undefined)
 	{
-		console.log('✅ lockResult is undefined in worker, this is fine as we are calling lockMutex, not tryLockMutex');
+		console.log("✅ lockResult is undefined in worker, this is fine as we are calling lockMutex, not tryLockMutex");
 	}
-	console.log('unlocking in 1 second, I added a delay to simulate work being computed...');
+	console.log("unlocking in 1 second, I added a delay to simulate work being computed...");
 	await sleep(1000);
-	obj.instance.exports.unlockMutex(mutexAddr);
-	console.log('worker: unlocked');
+	atomics.instance.exports.unlockMutex(mutexAddr);
+	console.log("worker %d: unlocked", index);
 }
 
-async function sleep(durationInMs)
+onmessage = async function(message)
 {
-    return new Promise
-    (
-    	resolve =>
-		{
-			setTimeout(
-				() => 
-				{
-					resolve();
-				},
-				durationInMs
-			);
-		}
+	const data = message.data;
+	const { memory, index } = data;
+	
+	const imports = {env: {memory: memory}};
+	Promise.all(
+		[
+			WebAssembly.instantiateStreaming(fetch(atomicsUri), imports),
+			WebAssembly.instantiateStreaming(fetch(exampleUri), imports),
+		]
 	)
-}
-
-onmessage = async function(e)
-{
-    console.log('onmessage',e);
-    
-    const response = await fetch(atomicsUri);
-    const imports = {env: {memory: e.data}};
-	WebAssembly.instantiateStreaming(response, imports)
-	.then(main)
-	.catch
-	(
-		(err) =>
-		{
-			console.error(err);
-		}
-	);
+	.then ( (modules) => { run(index, modules); } )
+	.catch( (err)     => { console.error(err);  } )
+	;
 }
