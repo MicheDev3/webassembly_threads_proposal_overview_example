@@ -46,10 +46,10 @@
   			
   			(drop
 				(call $notify
-		        	(local.get $address)
-		        	(i32.const 1)
-		        )
-	        )
+					(local.get $address)
+					(i32.const 1)
+				)
+			)
   	)
   	
   	;; Wait thread for work
@@ -65,8 +65,8 @@
 	        (drop
 	        	(call $wait 
 	        		(local.get $address)
-	        		(i32.const  0)
-	        		(i64.const -1)
+					(i32.const  0)
+					(i64.const -1)
 	        	)
 	    	)
   	)
