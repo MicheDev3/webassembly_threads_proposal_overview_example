@@ -11,9 +11,34 @@ async function run(modules)
 	const threadCount = window.navigator.hardwareConcurrency - 1;
 	console.log("spawing %d workers", threadCount);
 	
+	// TODO: Temp for testing
+	//{
+	var temp = 0;
+	//}
+	var buffer = new Uint8Array(imports["env"]["memory"].buffer);
+	
+	var   offset = 0;
+	const size   = 16;
 	const workers = [];
 	for (let i = 0; i < threadCount; i++)
 	{
+		const context = 
+		{
+			"thread_index": i,
+			"mutex":        offset,
+			"semaphore":    offset + (i+1)*8
+		};
+		
+		// TODO: Temp for testing
+		//{
+		if (i==0) { temp = context["semaphore"]; }
+		//}
+		
+		// NOTE: wait function, for now at least, will always decremeant at the
+		// start the semaphore so we need to initialise it as 1 before spawing
+		// the worker
+		buffer[context["semaphore"]] = 1;
+		
 		// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
 		const worker = new Worker("/js/worker.js", { type: "module" });
 		workers.push(
@@ -24,28 +49,25 @@ async function run(modules)
 						{
 							modules: modules,
 							imports: imports,
-							thread_index: i,
+							context: context,
 						}
 					);
 					worker.onmessage = (event) => resolve(event.data);
 				}
 			)
 		);
+		
+		offset += size;
 	}
-
-	const mutexAddr = 0;
-	const tryLockResult = atomics.exports.tryLockMutex(mutexAddr);
-	if (tryLockResult) 
+	
+	// TODO: Temp for testing
+	//{
+	for (let i = 0; i < 4; i++)
 	{
-		console.log("✅ mutex is locked in main thread");
 		await sleep(5000);
-		atomics.exports.unlockMutex(mutexAddr);
-		console.log("main: unlocked");
-	} 
-	else
-	{
-		console.log("❌ mutex is NOT locked in main thread");
+		atomics.exports.wake(temp);
 	}
+	//}
 	
 	await Promise.all(workers);
 }

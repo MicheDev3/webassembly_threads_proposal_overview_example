@@ -1,80 +1,130 @@
 (module
   	;; Import 1 page (64Kib) of shared memory.
   	(import "env" "memory" (memory 1 1 shared))
-
-  	;; Try to lock a mutex at the given address.
-  	;; Returns 1 if the mutex was successfully locked, and 0 otherwise.
-  	(
-  		func $tryLockMutex (export "tryLockMutex")
-  		(param $mutexAddr i32)
+  	
+  	;; TODO: These are functions now, so that it is easier
+  	;; Inline these in the future though
+  	;;(
+  	(func $wait
+  		(param $address i32)
+  		(param $value   i32) ;; value to wait for
+  		(param $timeout i64) ;; $timeout=-1 => infinite timeout
   		(result i32)
-	    	;; Attempt to grab the mutex. The cmpxchg operation atomically
-	    	;; does the following:
-	    	;; - Loads the value at $mutexAddr.
-	    	;; - If it is 0 (unlocked), set it to 1 (locked).
-	    	;; - Return the originally loaded value.
-	    	(i32.atomic.rmw.cmpxchg
-	      		(local.get $mutexAddr)         ;; mutex address
-	      		(i32.const 0)                  ;; expected    value (0 => unlocked)
-	      		(i32.const 1)                  ;; replacement value (1 => locked  )
-	  		)
-	
-			;; The top of the stack is the originally loaded value.
-			;; If it is 0, this means we acquired the mutex. We want to
-			;; return the inverse (1 means mutex acquired), so use i32.eqz
-			;; as a logical not.
-			(i32.eqz)
+			;; Wait for the address. memory.atomic.wait32 returns:
+			;;   0 => "ok", woken by another agent.
+			;;   1 => "not-equal", loaded value != expected value
+			;;   2 => "timed-out", the timeout expired
+  			(memory.atomic.wait32
+	        	(local.get $address)
+	          	(local.get $value)
+	          	(local.get $timeout)
+          	)
   	)
+  	
+  	(func $notify
+  		(param $address i32)
+  		(param $value   i32) ;; number of waiters to wake
+  		(result i32)
+			;; Notify waiters. memory.atomic.notify returns
+			;; the numbers of waiters woken
+			(memory.atomic.notify
+	        	(local.get $address)
+	        	(local.get $value)
+	        )
+  	)
+  	;;)
+
+  	;; Wake thread for work
+  	(func (export "wake")
+  		(param $address i32)
+  			(drop
+				(i32.atomic.rmw.add
+  					(local.get $address)
+  					(i32.const 1)
+  				)
+  			)
+  			
+  			(drop
+				(call $notify
+		        	(local.get $address)
+		        	(i32.const 1)
+		        )
+	        )
+  	)
+  	
+  	;; Wait thread for work
+  	(func (export "wait")
+  		(param $address i32)
+  			(drop
+				(i32.atomic.rmw.sub
+  					(local.get $address)
+  					(i32.const 1)
+  				)
+  			)
+  			
+	        (drop
+	        	(call $wait 
+	        		(local.get $address)
+	        		(i32.const  0)
+	        		(i64.const -1)
+	        	)
+	    	)
+  	)
+  	
 
   	;; Lock a mutex at the given address, retrying until successful.
-  	(
-  		func (export "lockMutex") 
-  		(param $mutexAddr i32)
+  	(func (export "lock") 
+  		(param $address i32)
 	    	(block $done
 	      		(loop $retry
-	        		;; Try to lock the mutex. $tryLockMutex returns 1 if the mutex
-	        		;; was locked, and 0 otherwise.
-	        		(call $tryLockMutex (local.get $mutexAddr))
+      			    ;; Attempt locking. atomic.rmw.cmpxchg works as follow:
+				    ;; - Loads the value at $address.
+				    ;; - If it is 0 (unlocked), set it to 1 (locked).
+				    ;; - Return the originally loaded value.
+				    ;;(
+				    	(i32.atomic.rmw.cmpxchg
+				      		(local.get $address)
+		    		  		(i32.const  0) ;; expected value    (0 => unlocked)
+		      				(i32.const  1) ;; replacement value (1 => locked  )
+		  				)
+	  				    ;; Negates the loaded value to have:
+	  				    ;; - If 0 => 1, meaning lock     acquired
+	  				    ;; - If 1 => 0, meaning lock NOT acquired
+						(i32.eqz)
+					;;)
+					
+					;; Breaks if lock acquired
 	        		(br_if $done)
-	
-	        		;; Wait for the other agent to finish with mutex.
-			        (memory.atomic.wait32
-			        	(local.get $mutexAddr) ;; mutex address
-			          	(i32.const 1)          ;; expected value (1 => locked)
-			          	(i64.const -1)         ;; infinite timeout
-		          	)
-	
-			        ;; memory.atomic.wait32 returns:
-			        ;;   0 => "ok", woken by another agent.
-			        ;;   1 => "not-equal", loaded value != expected value
-			        ;;   2 => "timed-out", the timeout expired
-			        ;;
-			        ;; Since there is an infinite timeout, only 0 or 1 will be returned. In
-			        ;; either case we should try to acquire the mutex again, so we can
-			        ;; ignore the result.
-			        (drop)
-	
-	        	;; Try to acquire the lock again.
-	        	(br $retry)
+
+					;; We do not care about the result so we drop it
+			        (drop
+			        	(call $wait 
+			        		(local.get $address)
+			        		(i32.const  0)
+			        		(i64.const -1)
+			        	)
+		        	)
+					
+					;; Try to acquire the lock again.
+		        	(br $retry)
 	      		)
 	    	)
   	)
 
-  	;; Unlock a mutex at the given address.
-  	(
-  		func (export "unlockMutex")
-    	(param $mutexAddr i32)
-		    ;; Unlock the mutex.
+	;; Unlock a mutex at the given address.
+  	(func (export "unlock")
+    	(param $address i32)
+    		;; Unlock the address by storing 0.
 		    (i32.atomic.store
-		      	(local.get $mutexAddr)         ;; mutex address
-		      	(i32.const 0)                  ;; 0 => unlocked
+		      	(local.get $address)
+		      	(i32.const 0)
 	      	)
 		
-		    ;; Notify one agent that is waiting on this lock.
+			;; We do not care about the result so we drop it
 		    (drop
-				(memory.atomic.notify
-		        	(local.get $mutexAddr)     ;; mutex address
-		        	(i32.const 1)              ;; notify 1 waiter
+				(call $notify
+		        	(local.get $address)
+		        	(i32.const 1)
 		        )
 	        )
   	)
