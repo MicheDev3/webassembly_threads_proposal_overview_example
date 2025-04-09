@@ -11,33 +11,33 @@ async function run(modules)
 	const threadCount = window.navigator.hardwareConcurrency - 1;
 	console.log("spawing %d workers", threadCount);
 	
-	// TODO: Temp for testing
-	//{
-	var temp = 0;
-	//}
 	var buffer = new Uint8Array(imports["env"]["memory"].buffer);
 	
-	var   offset = 0;
+	var   offset = 8;
 	const size   = 16;
-	const workers = [];
+	
+	const shouldExitAddress = 0;
+	// TODO: Save these in some structure
+	//{
+	const workers  = [];
+	const contexts = [];
+	//}
 	for (let i = 0; i < threadCount; i++)
 	{
 		const context = 
 		{
-			"thread_index": i,
-			"mutex":        offset,
-			"semaphore":    offset + (i+1)*8
+			"shouldExitAddress": shouldExitAddress,
+			"thread_index":      i,
+			"mutexAddr":         offset,
+			"semaphoreAddr":     offset + 8,
 		};
-		
-		// TODO: Temp for testing
-		//{
-		if (i==0) { temp = context["semaphore"]; }
-		//}
+		contexts.push(context);
 		
 		// NOTE: wait function, for now at least, will always decremeant at the
 		// start the semaphore so we need to initialise it as 1 before spawing
 		// the worker
-		buffer[context["semaphore"]] = 1;
+		// TODO: This is 4 bytes but only updating 1 byte
+		buffer[context["semaphoreAddr"]] = 1;
 		
 		// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
 		const worker = new Worker("/js/worker.js", { type: "module" });
@@ -59,13 +59,27 @@ async function run(modules)
 		
 		offset += size;
 	}
+
+	await sleep(1000);
 	
 	// TODO: Temp for testing
 	//{
 	for (let i = 0; i < 4; i++)
 	{
+		var context = contexts[Math.floor(Math.random()*contexts.length)];
+		atomics.exports.wake(context["semaphoreAddr"]);
+
 		await sleep(5000);
-		atomics.exports.wake(temp);
+	}
+	//}
+	
+	// NOTE: Terminating all workers
+	//{
+	await sleep(1000);
+	buffer[shouldExitAddress] = 1;
+	for (const context of contexts)
+	{
+		atomics.exports.wake(context["semaphoreAddr"]);
 	}
 	//}
 	
