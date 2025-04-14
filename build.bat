@@ -1,4 +1,6 @@
 @echo off
 
-wat2wasm --enable-threads wasm/atomics.wat -o public/atomics.wasm
-wat2wasm --enable-threads wasm/example.wat -o public/example.wasm
+set "FLAGS=--enable-threads --enable-memory64" 
+
+wat2wasm %FLAGS% wasm/memory.wat -o public/memory.wasm
+wat2wasm %FLAGS% wasm/atomic.wat -o public/atomic.wasm

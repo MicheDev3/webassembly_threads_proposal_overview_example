@@ -2,30 +2,28 @@ import { sleep } from "/js/common.js";
 
 onmessage = async function(message)
 {
-	const data = message.data;
-	const { modules, imports, context} = data;
+	const { module, imports, context} = message.data;
 	
-	const atomics = new WebAssembly.Instance(modules[0], imports);
-	const example = new WebAssembly.Instance(modules[1], imports);
+	const atomicInstance = new WebAssembly.Instance(module, imports);
+
+	const memory = imports["env"]["memory"];
+	var data = new Uint8Array(memory.buffer);
 
 	console.log("worker(%d): started", context["thread_index"]);
-
-	var buffer = new Uint8Array(imports["env"]["memory"].buffer);
-
-	while (buffer[context["shouldExitAddress"]] == 0)
+	while (data[context["shouldExitAddress"]] == 0)
 	{
 		console.log("worker(%d): waiting for work", context["thread_index"]);
-		atomics.exports.wait(context["semaphoreAddr"]);
-		if (buffer[context["shouldExitAddress"]] != 0)
+		atomicInstance.exports.wait(BigInt(context["semaphoreAddr"]));
+		if (data[context["shouldExitAddress"]] != 0)
 		{
 			break;
 		}
 
 		console.log("worker(%d): requesting lock", context["thread_index"]);
-		atomics.exports.lock(context["mutexAddr"]);
+		atomicInstance.exports.lock(BigInt(context["mutexAddr"]));
 		console.log("worker(%d): computing work", context["thread_index"]);
 		await sleep(1000);
-		atomics.exports.unlock(context["mutexAddr"]);
+		atomicInstance.exports.unlock(BigInt(context["mutexAddr"]));
 		console.log("worker(%d): unlocked", context["thread_index"]);
 	}
 	
