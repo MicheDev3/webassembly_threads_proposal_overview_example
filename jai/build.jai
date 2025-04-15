@@ -198,22 +198,22 @@ WatToWasmTarget :: struct
 
 KIBIBYTES :: (value: s64) -> s64 #expand #no_debug
 {
-    return value*1024;
+	return value*1024;
 }
 
 MEBIBYTES :: (value: s64) -> s64 #expand #no_debug
 {
-    return KIBIBYTES(value)*1024;
+	return KIBIBYTES(value)*1024;
 }
 
 GIBIBYTES :: (value: s64) -> s64 #expand #no_debug
 {
-    return MEBIBYTES(value)*1024;
+	return MEBIBYTES(value)*1024;
 }
 
 TEBIBYTES :: (value: s64) -> s64 #expand #no_debug
 {
-    return GIBIBYTES(value)*1024;
+	return GIBIBYTES(value)*1024;
 }
 
 /////////////////////////////
@@ -232,38 +232,38 @@ build_project ::
 	nr_pages: int
 )
 {
-    w := compiler_create_workspace("Wasm");
-
-    child_options := get_build_options(w);
-    copy_commonly_propagated_fields(parent_options, *child_options);
-
-    child_options.output_type                         = .EXECUTABLE;
-    child_options.backend                             = .LLVM;
-    child_options.os_target                           = .WASM;
-    child_options.cpu_target                          = .CUSTOM;
-    child_options.emit_debug_info                     = .DWARF;
-    child_options.backtrace_on_crash                  = .OFF; // Runtime_Support_Crash_Handler doesn’t support WASM (yet?)
-    child_options.output_path                         = wasm_output_path;
-    child_options.output_executable_name              = "main";
-     // +bulk-memory: will map "memcpy" to "memory.copy" and "memset" to "memory.fill".
-     // +atomics    : necessary for setting "--shared-memory" linker flag.
+	w := compiler_create_workspace("Wasm");
+	
+	child_options := get_build_options(w);
+	copy_commonly_propagated_fields(parent_options, *child_options);
+	
+	child_options.output_type                         = .EXECUTABLE;
+	child_options.backend                             = .LLVM;
+	child_options.os_target                           = .WASM;
+	child_options.cpu_target                          = .CUSTOM;
+	child_options.emit_debug_info                     = .DWARF;
+	child_options.backtrace_on_crash                  = .OFF; // Runtime_Support_Crash_Handler doesn’t support WASM (yet?)
+	child_options.output_path                         = wasm_output_path;
+	child_options.output_executable_name              = "main";
+	// +bulk-memory: will map "memcpy" to "memory.copy" and "memset" to "memory.fill".
+	// +atomics    : necessary for setting "--shared-memory" linker flag.
 	child_options.llvm_options.target_system_features = "+bulk-memory,+atomics";
-    child_options.llvm_options.enable_split_modules   = false;
-    child_options.llvm_options.function_sections      = true; // To get around "LLVM ERROR: section already has a defining function: .text"
-
-    import_paths: [..]string;
-    array_add(*import_paths, tprint("%modules", #filepath));
-    for child_options.import_path
-    {
-    	array_add(*import_paths, it);
-    }
-    child_options.import_path = import_paths;
-
-    // This was compiled from https://github.com/wingo/walloc via "clang -Oz --target=wasm64 -nostdlib -c -o walloc.o walloc.c".
-    // We should probably port this allocator to Jai instead…
-    //  -rluba, 2023-11-15
-    walloc_object_file_path := "modules/Walloc/walloc.o";
-    memory_size := nr_pages*WASM_MEMORY_PAGE_SIZE;
+	child_options.llvm_options.enable_split_modules   = false;
+	child_options.llvm_options.function_sections      = true; // To get around "LLVM ERROR: section already has a defining function: .text"
+	
+	import_paths: [..]string;
+	array_add(*import_paths, tprint("%modules", #filepath));
+	for child_options.import_path
+	{
+		array_add(*import_paths, it);
+	}
+	child_options.import_path = import_paths;
+	
+	// This was compiled from https://github.com/wingo/walloc via "clang -Oz --target=wasm64 -nostdlib -c -o walloc.o walloc.c".
+	// We should probably port this allocator to Jai instead…
+	//  -rluba, 2023-11-15
+	walloc_object_file_path := "modules/Walloc/walloc.o";
+	memory_size := nr_pages*WASM_MEMORY_PAGE_SIZE;
 	child_options.additional_linker_arguments = .[
 		"--import-memory", // memory will be created statically in the memory.wat file and shared with workers and main thread
 		"--shared-memory", // memory must be sharable in order for workers and main thread to work on the same chunk of memory (default behavior is copying from/to worker-main boundaries)
@@ -271,31 +271,31 @@ build_project ::
 		tprint("--max-memory=%",     memory_size), // shared memory is fixed (cannot grow at runtime) so we must specify the maximum number pages available
 		walloc_object_file_path
 	];
-
-    set_build_options(child_options, w);
-    // Replace the default allocator with Walloc (https://github.com/wingo/walloc).
-    remap_import(w, "*", "Default_Allocator", "Walloc");
-    
-    compiler_begin_intercept(w);
-    
-    add_build_file("main.jai", w);
-    
-    while true 
-    {
-        message := compiler_wait_for_message();
-        if message.kind == 
-        {
-            case .TYPECHECKED;
-            {
+	
+	set_build_options(child_options, w);
+	// Replace the default allocator with Walloc (https://github.com/wingo/walloc).
+	remap_import(w, "*", "Default_Allocator", "Walloc");
+	
+	compiler_begin_intercept(w);
+	
+	add_build_file("main.jai", w);
+	
+	while true
+	{
+		message := compiler_wait_for_message();
+		if message.kind ==
+		{
+			case .TYPECHECKED;
+			{
 				typechecked := cast(*Message_Typechecked) message;
-                for body: typechecked.procedure_bodies 
-                {
-                    header := body.expression.header;
-                }
-            }
-            case .COMPLETE;
-            {
-            	files: []WatToWasmTarget = .[
+				for body: typechecked.procedure_bodies
+				{
+					header := body.expression.header;
+				}
+			}
+			case .COMPLETE;
+			{
+				files: []WatToWasmTarget = .[
 					.{
 						tprint("%/memory.wat", wat_output_path),
 						tprint("%/memory.wasm", wasm_output_path),
@@ -308,8 +308,8 @@ build_project ::
 						tprint(WAT_ATOMIC_FILE_CONTENT, nr_pages),
 						string.[],
 					}
-            	];
-            	
+				];
+				
 				for files
 				{
 					if !write_entire_file(it.src, it.data)
@@ -339,15 +339,15 @@ build_project ::
 					print("     - from '%' to '%'\n", it.src, it.dst);
 				}
 				
-                break;
-            }
-        }
-    }
-    
-    compiler_end_intercept(w);
+				break;
+			}
+		}
+	}
+	
+	compiler_end_intercept(w);
 }
 
-#run 
+#run
 {
 	w := get_current_workspace();
 	parent_options := get_build_options(w);
@@ -377,9 +377,9 @@ build_project ::
 /////////////////////////////
 
 #import "Basic";
+
 #import "Compiler";
 #import "File";
 #import "Process";
 
 /////////////////////////////
-
