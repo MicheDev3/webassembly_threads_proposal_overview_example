@@ -3,51 +3,51 @@ import { sleep } from "/js/common.js";
 // console.log and console.error always add newlines so we need to buffer the output from write_string
 // to simulate a more basic I/O behavior. We’ll flush it after a certain time so that you still
 // see the last line if you forget to terminate it with a newline for some reason.
-let console_buffer = "";
-let console_buffer_is_standard_error;
-let console_timeout;
+let consoleBuffer = "";
+let consoleBufferIsStandardError;
+let consoleTimeout;
 const FLUSH_CONSOLE_AFTER_MS = 3;
 
-function write_to_console_log(str, to_standard_error)
+function writeToConsoleLog(str, to_standard_error)
 {
-    if (console_buffer && console_buffer_is_standard_error != to_standard_error) 
-    {
-        flush_buffer();
-    }
-
-    console_buffer_is_standard_error = to_standard_error;
-    const lines = str.split("\n");
-    for (let i = 0; i < lines.length - 1; i++)
-    {
-        console_buffer += lines[i];
-        flush_buffer();
-    }
-
-    console_buffer += lines[lines.length - 1];
-
-    clearTimeout(console_timeout);
-    if (console_buffer) 
-    {
-        console_timeout = setTimeout(() => {
-            flush_buffer();
-        }, FLUSH_CONSOLE_AFTER_MS);
-    }
-
-    function flush_buffer()
-    {
-        if (!console_buffer) return;
-
-        if (console_buffer_is_standard_error)
-        {
-            console.error(console_buffer);
-        }
-        else
-        {
-            console.log(console_buffer);
-        }
-
-        console_buffer = "";
-    }
+	if (consoleBuffer && consoleBufferIsStandardError != to_standard_error)
+	{
+		flushBuffer();
+	}
+	
+	consoleBufferIsStandardError = to_standard_error;
+	const lines = str.split("\n");
+	for (let i = 0; i < lines.length - 1; i++)
+	{
+		consoleBuffer += lines[i];
+		flushBuffer();
+	}
+	
+	consoleBuffer += lines[lines.length - 1];
+	
+	clearTimeout(consoleTimeout);
+	if (consoleBuffer)
+	{
+		consoleTimeout = setTimeout(() => {
+			flushBuffer();
+		}, FLUSH_CONSOLE_AFTER_MS);
+	}
+	
+	function flushBuffer()
+	{
+		if (!consoleBuffer) return;
+		
+		if (consoleBufferIsStandardError)
+		{
+			console.error(consoleBuffer);
+		}
+		else
+		{
+			console.log(consoleBuffer);
+		}
+		
+		consoleBuffer = "";
+	}
 }
 
 async function run(modules)
@@ -55,14 +55,14 @@ async function run(modules)
 	const memoryModule = modules[0];
 	const atomicModule = modules[1];
 	const mainModule   = modules[2];
-
+	
 	const memoryInstance = new WebAssembly.Instance(memoryModule);
 	const memory = memoryInstance.exports.memory;
 	
 	// TODO: Properly understand this
 	//{
-	const text_decoder = new TextDecoder();
-	function js_string_from_jai_string(pointer, length)
+	const decoder = new TextDecoder();
+	function jaiTojsString(pointer, length)
 	{
 		const u8 = new Uint8Array(memory.buffer)
 		const bytes = u8.subarray(Number(pointer), Number(pointer) + Number(length));
@@ -73,60 +73,60 @@ async function run(modules)
 		const tempView = new Uint8Array(tempBuffer);
 		tempView.set(bytes);
 		
-		return text_decoder.decode(tempBuffer);
+		return decoder.decode(tempBuffer);
 	}
 	//}
-
-	const imports = {
-		env: {
-			memory: memory,
-			wasm_write_string: (s_count, s_data, to_standard_error) => {
-				const string = js_string_from_jai_string(s_data, s_count);
-				write_to_console_log(string, to_standard_error);
-			},
-			wasm_debug_break: () => {
-				debugger;
-			},
-			wasm_log_dom: (s_count, s_data, is_error) => {
-				const log = document.querySelector("#log");
-				const string = js_string_from_jai_string(s_data, s_count);
-				const lines = string.split("\n");
-				for (let i = 0; i < lines.length; i++) {
-					const line = lines[i];
-					if (!line && i == lines.length - 1) continue; // Don’t create an extra empty line after the last newline
+	
+	const atomicInstance = new WebAssembly.Instance(atomicModule, {env: {memory: memory}});
+	const mainInstance   = new WebAssembly.Instance(mainModule,
+		{
+			env:
+			{
+				memory: memory,
+				wasm_write_string: (s_count, s_data, to_standard_error) =>
+				{
+					const string = jaiTojsString(s_data, s_count);
+					writeToConsoleLog(string, to_standard_error);
+				},
+				wasm_debug_break: () => { debugger; },
+				wasm_log_dom: (s_count, s_data, is_error) =>
+				{
+					const log = document.querySelector("#log");
+					const string = jaiTojsString(s_data, s_count);
+					const lines = string.split("\n");
+					for (let i = 0; i < lines.length; i++)
+					{
+						const line = lines[i];
+						if (!line && i == lines.length - 1) continue; // Don’t create an extra empty line after the last newline
+						
+						const element = document.createElement("div");
+						if (is_error) element.style.color = "#d33";
+						element.innerText = line;
+						log.appendChild(element);
+					}
+				},
+				// TODO: Have this in wasm directly
+				memcmp: (lhs, rhs, size) =>
+				{
+					// https://discord.com/channels/661732390355337246/1172463903943446548/1256763226847187127
+					// https://www.tutorialspoint.com/c_standard_library/c_function_memcmp.htm
+					const str1 = jaiTojsString(lhs, size);
+					const str2 = jaiTojsString(rhs, size);
+					if (str1 == str2)    { return  0; }
+					if (!(str1 && str2)) { return -1; }
+					if (str1 < str2)     { return -1; }
+					if (str1 > str2)     { return  1; }
 					
-					const element = document.createElement("div");
-					if (is_error) element.style.color = "#d33";
-					element.innerText = line;
-					log.appendChild(element);
-				}
-			},
-			memcmp: (lhs, rhs, size) => {
-				// https://discord.com/channels/661732390355337246/1172463903943446548/1256763226847187127
-				// https://www.tutorialspoint.com/c_standard_library/c_function_memcmp.htm
-				const str1 = js_string_from_jai_string(lhs, size);
-				const str2 = js_string_from_jai_string(rhs, size);
-				if (str1 == str2) {
-					return 0;
-				}
-				if (!(str1 && str2)) {
 					return -1;
-				}
-				if (str1 < str2) {
-					return -1;
-				}
-				if (str1 > str2) {
-					return 1;
-				}
-				return -1;
+				},
+				wake: atomicInstance.exports.wake,
+				sleep: sleep,
 			}
 		}
-	};
-	const atomicInstance = new WebAssembly.Instance(atomicModule, imports);
-	const mainInstance   = new WebAssembly.Instance(mainModule  , imports);
+	);
 	
 	mainInstance.exports.main(0, BigInt(0));
-
+	
 	const threadCount = window.navigator.hardwareConcurrency - 1;
 	console.log("spawing %d workers", threadCount);
 	
@@ -143,7 +143,7 @@ async function run(modules)
 	//}
 	for (let i = 0; i < threadCount; i++)
 	{
-		const context = 
+		const context =
 		{
 			"shouldExitAddress": shouldExitAddress,
 			"thread_index":      i,
@@ -178,7 +178,7 @@ async function run(modules)
 		
 		offset += size;
 	}
-
+	
 	await sleep(1000);
 	
 	// TODO: Temp for testing
@@ -187,7 +187,7 @@ async function run(modules)
 	{
 		var context = contexts[Math.floor(Math.random()*contexts.length)];
 		atomicInstance.exports.wake(BigInt(context["semaphoreAddr"]));
-
+		
 		await sleep(5000);
 	}
 	//}
@@ -202,9 +202,13 @@ async function run(modules)
 	}
 	//}
 	
-	// TODO(mike): This does not return when the workers are terminated.
-	// Understand why
-	await Promise.all(workers);	
+	// TODO(mike): Understand how to properly use Promise.all()
+	await Promise.all(workers)
+	.then(
+		(values) =>
+		{
+		}
+	);
 }
 
 async function main()

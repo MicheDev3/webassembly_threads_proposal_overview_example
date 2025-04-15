@@ -226,13 +226,13 @@ TEBIBYTES :: (value: s64) -> s64 #expand #no_debug
 build_project ::
 (
 	parent_options: Build_Options,
-	compiler_path: string,
+	wasm_compiler_path: string,
 	wat_output_path: string,
 	wasm_output_path: string,
 	nr_pages: int
 )
 {
-	w := compiler_create_workspace("Wasm");
+	w := compiler_create_workspace("Main");
 	
 	child_options := get_build_options(w);
 	copy_commonly_propagated_fields(parent_options, *child_options);
@@ -310,6 +310,9 @@ build_project ::
 					}
 				];
 				
+				print("\nSelected % (64Kib) memory pages\n", nr_pages);
+				print("WASM compiler: \"%\"\n", wasm_compiler_path);
+				
 				for files
 				{
 					if !write_entire_file(it.src, it.data)
@@ -318,7 +321,7 @@ build_project ::
 					}
 					
 					args: [..]string;
-					array_add(*args, compiler_path);
+					array_add(*args, wasm_compiler_path);
 					array_add(*args, "--enable-threads");
 					array_add(*args, "--enable-memory64");
 					for flag: it.flags { array_add(*args, flag); }
@@ -333,7 +336,7 @@ build_project ::
 					}
 				}
 				
-				print("\nGenerated and compiled wat files:\n");
+				print("Generated and compiled wat files:\n");
 				for files
 				{
 					print("     - from '%' to '%'\n", it.src, it.dst);
@@ -352,8 +355,7 @@ build_project ::
 	w := get_current_workspace();
 	parent_options := get_build_options(w);
 	
-	nr_pages := 100;
-	wat_output_path := "wat/";
+	wat_output_path := "../wat/";
 	wasm_output_path := "../public/";
 	for string.[wat_output_path, wasm_output_path]
 	{
@@ -363,8 +365,19 @@ build_project ::
 		}
 	}
 	
-	compiler_path := "wat2wasm";
-	build_project(parent_options, compiler_path, wat_output_path, wasm_output_path, nr_pages);
+	nr_pages := 100;
+	wasm_compiler_path := "wat2wasm";
+	args := parent_options.compile_time_command_line;
+	for args
+	{
+		if it_index ==
+		{
+			case 0; { wasm_compiler_path = it;   }
+			case 1; { nr_pages = to_integer(it); }
+		}
+	}
+	
+	build_project(parent_options, wasm_compiler_path, wat_output_path, wasm_output_path, nr_pages);
 	
 	set_build_options_dc(.{do_output = false}, w);
 }

@@ -2,7 +2,13 @@ Based on the example from https://github.com/WebAssembly/threads/blob/main/propo
 
 # How to Compile
 
-You can compile the project by running `jai jai/build.jai` which will compile Jai into WASM and generate and compile any WAT file required 
+You can compile the project by running `jai jai/build.jai` which will compile Jai into WASM and generate and compile any WAT file required
+Parameters (they must be defined in this order):
+
+	- wasm-compiler-path: compiler to generate wasm files for wat. Default: "wat2wasm"
+	- memory-pages: how many pages the memory will have. Default: 100
+
+e.g: `jai jai/build.jai - path\to\wat2wasm 20` 
 
 # How to Run
 
@@ -12,7 +18,7 @@ You can view the web app using the following url `http://localhost:8085/` (use t
 # Requirements
 
 - Jai compiler (version currently tested: jai-beta-2-009)
-- WASM compiler (using wat2wasm from wabt)
+- WASM compiler (compiler currently tested: wat2wasm)
 
 # Useful links for further research
 

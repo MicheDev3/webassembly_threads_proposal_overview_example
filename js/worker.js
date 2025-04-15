@@ -5,10 +5,10 @@ onmessage = async function(message)
 	const { module, imports, context} = message.data;
 	
 	const atomicInstance = new WebAssembly.Instance(module, imports);
-
+	
 	const memory = imports["env"]["memory"];
 	var data = new Uint8Array(memory.buffer);
-
+	
 	console.log("worker(%d): started", context["thread_index"]);
 	while (data[context["shouldExitAddress"]] == 0)
 	{
@@ -18,7 +18,7 @@ onmessage = async function(message)
 		{
 			break;
 		}
-
+		
 		console.log("worker(%d): requesting lock", context["thread_index"]);
 		atomicInstance.exports.lock(BigInt(context["mutexAddr"]));
 		console.log("worker(%d): computing work", context["thread_index"]);
