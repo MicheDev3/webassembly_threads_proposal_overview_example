@@ -1,32 +1,49 @@
-import { sleep } from "/js/common.js";
+import { sleep, jaiTojsString, wasmDebugBreak, writeToConsoleLog } from "/js/common.js";
 
 onmessage = async function(message)
 {
-	const { module, imports, context} = message.data;
-	
-	const atomicInstance = new WebAssembly.Instance(module, imports);
+	const { modules, imports, thread_index} = message.data;
 	
 	const memory = imports["env"]["memory"];
-	var data = new Uint8Array(memory.buffer);
 	
-	console.log("worker(%d): started", context["thread_index"]);
-	while (data[context["shouldExitAddress"]] == 0)
+	// TODO: Have this in wasm directly
+	function memcmp(lhs, rhs, size)
 	{
-		console.log("worker(%d): waiting for work", context["thread_index"]);
-		atomicInstance.exports.wait(BigInt(context["semaphoreAddr"]));
-		if (data[context["shouldExitAddress"]] != 0)
-		{
-			break;
-		}
+		// https://discord.com/channels/661732390355337246/1172463903943446548/1256763226847187127
+		// https://www.tutorialspoint.com/c_standard_library/c_function_memcmp.htm
+		const str1 = jaiTojsString(memory.buffer, lhs, size);
+		const str2 = jaiTojsString(memory.buffer, rhs, size);
+		if (str1 == str2)    { return  0; }
+		if (!(str1 && str2)) { return -1; }
+		if (str1 < str2)     { return -1; }
+		if (str1 > str2)     { return  1; }
 		
-		console.log("worker(%d): requesting lock", context["thread_index"]);
-		atomicInstance.exports.lock(BigInt(context["mutexAddr"]));
-		console.log("worker(%d): computing work", context["thread_index"]);
-		await sleep(1000);
-		atomicInstance.exports.unlock(BigInt(context["mutexAddr"]));
-		console.log("worker(%d): unlocked", context["thread_index"]);
+		return -1;
+	};
+	
+	function wasmWriteString(count, data, toStandardError)
+	{
+		const value = jaiTojsString(memory.buffer, data, count);
+		writeToConsoleLog(value, toStandardError);
 	}
 	
-	console.log("worker(%d): terminated", context["thread_index"]);
-}
+	const atomicInstance = new WebAssembly.Instance(modules[0], imports);
+	const threadInstance = new WebAssembly.Instance(modules[1],
+		{
+			env:
+			{
+				memory: memory,
+				wasm_write_string: wasmWriteString,
+				wasm_debug_break:  wasmDebugBreak,
+				memcmp: memcmp,
+				wait:   atomicInstance.exports.wait,
+				lock:   atomicInstance.exports.lock,
+				unlock: atomicInstance.exports.unlock,
+				sleep:  sleep,
+			}
+		}
+	);
 
+	console.log("worker(%d): running", thread_index);
+	threadInstance.exports.worker_proc(thread_index);
+}
