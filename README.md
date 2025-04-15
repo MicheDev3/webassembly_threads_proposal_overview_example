@@ -1,11 +1,18 @@
 Based on the example from https://github.com/WebAssembly/threads/blob/main/proposals/threads/Overview.md
 
-# How to start
+# How to Compile
 
-- build the .wasm from the .wat by running `./build.sh` (wat2wasm is from https://github.com/WebAssembly/wabt)
-- start the server with `./server_start.sh`
-- open the web page at `http://localhost:8085/`
-- view logs in the browser dev console
+You can compile the project by running `jai jai/build.jai` which will compile Jai into WASM and generate and compile any WAT file required 
+
+# How to Run
+
+You can start the server by running the python script `server.py` on a terminal; e.g: `python server.py`
+You can view the web app using the following url `http://localhost:8085/` (use the browser dev console to view any logs)
+
+# Requirements
+
+- Jai compiler (version currently tested: jai-beta-2-009)
+- WASM compiler (using wat2wasm from wabt)
 
 # Useful links for further research
 
