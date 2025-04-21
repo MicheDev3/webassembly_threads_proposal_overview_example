@@ -4,8 +4,7 @@ async function run(modules)
 {
 	const sharedModule = modules[0];
 	const atomicModule = modules[1];
-	const threadModule = modules[2];
-	const mainModule   = modules[3];
+	const mainModule   = modules[2];
 	
 	const sharedInstance = new WebAssembly.Instance(sharedModule);
 	const memory = sharedInstance.exports.memory;
@@ -31,24 +30,8 @@ async function run(modules)
 		writeToConsoleLog(value, toStandardError);
 	}
 	
-	const atomicInstance = new WebAssembly.Instance(atomicModule, {env: {memory: memory}});
-	const threadInstance = new WebAssembly.Instance(threadModule,
-		{
-			env:
-			{
-				memory: memory,
-				wasm_write_string: wasmWriteString,
-				wasm_debug_break:  wasmDebugBreak,
-				memcmp: memcmp,
-				wait:   atomicInstance.exports.wait,
-				lock:   atomicInstance.exports.lock,
-				unlock: atomicInstance.exports.unlock,
-				sleep:  sleep,
-			}
-		}
-	);
-	
 	const workers  = [];
+	const atomicInstance = new WebAssembly.Instance(atomicModule, {env: {memory: memory}});
 	const mainInstance = new WebAssembly.Instance(mainModule,
 		{
 			env:
@@ -59,14 +42,19 @@ async function run(modules)
 				memcmp: memcmp,
 				sleep:  sleep,
 				wake:   atomicInstance.exports.wake,
+				wait:   atomicInstance.exports.wait,
+				lock:   atomicInstance.exports.lock,
+				unlock: atomicInstance.exports.unlock,
 				get_worker_count: () =>
 				{
-					const workerCount = window.navigator.hardwareConcurrency - 1;
+					// const workerCount = window.navigator.hardwareConcurrency - 1;
+					const workerCount = 2;
 					
 					return BigInt(workerCount);
 				},
-				push_worker: (thread_index) =>
+				push_worker: (worker_index) =>
 				{
+					// console.log("pushing worker: %d\n", worker_index);
 					// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
 					const worker = new Worker("/js/worker.js", { type: "module" });
 					workers.push(
@@ -75,9 +63,9 @@ async function run(modules)
 							{
 								worker.postMessage(
 									{
-										modules: [atomicModule, threadModule],
+										modules: [atomicModule, mainModule],
 										imports: {env: {memory: memory}},
-										thread_index: thread_index,
+										worker_index: worker_index,
 									}
 								);
 								worker.onmessage = (event) => resolve(event.data);
@@ -85,7 +73,6 @@ async function run(modules)
 						)
 					);
 				},
-				init_workers: threadInstance.exports.init_workers,
 			}
 		}
 	);
@@ -107,13 +94,11 @@ async function main()
 	{
 		const sharedUri = "/public/shared.wasm";
 		const atomicUri = "/public/atomic.wasm";
-		const threadUri = "/public/thread.wasm";
 		const mainUri   = "/public/main.wasm"  ;
 		Promise.all(
 			[
 				WebAssembly.compileStreaming(fetch(sharedUri)),
 				WebAssembly.compileStreaming(fetch(atomicUri)),
-				WebAssembly.compileStreaming(fetch(threadUri)),
 				WebAssembly.compileStreaming(fetch(mainUri  )),
 			]
 		)

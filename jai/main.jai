@@ -2,28 +2,26 @@
 #import "Random";
 
 #load "common.jai";
+#load "thread.jai";
 
-sleep  :: (ms: float)     #foreign;
-wake   :: (address: *s64) #foreign;
-get_worker_count :: () -> s64 #foreign;
-push_worker  :: (worker_index: s64) #foreign;
-init_workers :: (worker_count: s64) -> []Worker #foreign;
+worker_proc :: (worker: Worker)
+{
+	print("worker(%): doing some work\n", worker.index);
+	sleep(1000);
+}
 
 main :: ()
 {
-	a := New(s64);
-	a.* = 10;
-	print("A(%): %\n", a, a.*);
+	workers := init_workers();
 	
-	// TODO: This is not working understand why. I think the issue might be related with
-	// a mismatch between __stack_pointer between module or something like that
-	workers := init_workers(get_worker_count());
-	for *workers
-	{
-		push_worker(it_index);
-	}
-	
+	// print("Start Sleeping\n");
 	// sleep(1000);
+	// print("Done Sleeping\n");
+	
+	worker := *workers[0];
+	wake(worker.semaphore);
+	
+	// fini_workers();
 	
 	// for 0..4
 	// {

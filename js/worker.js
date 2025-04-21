@@ -2,7 +2,10 @@ import { sleep, jaiTojsString, wasmDebugBreak, writeToConsoleLog } from "/js/com
 
 onmessage = async function(message)
 {
-	const { modules, imports, thread_index} = message.data;
+	const { modules, imports, worker_index} = message.data;
+	
+	const atomicModule = modules[0];
+	const mainModule   = modules[1];
 	
 	const memory = imports["env"]["memory"];
 	
@@ -27,8 +30,8 @@ onmessage = async function(message)
 		writeToConsoleLog(value, toStandardError);
 	}
 	
-	const atomicInstance = new WebAssembly.Instance(modules[0], imports);
-	const threadInstance = new WebAssembly.Instance(modules[1],
+	const atomicInstance = new WebAssembly.Instance(atomicModule, imports);
+	const mainInstance = new WebAssembly.Instance(mainModule,
 		{
 			env:
 			{
@@ -36,14 +39,16 @@ onmessage = async function(message)
 				wasm_write_string: wasmWriteString,
 				wasm_debug_break:  wasmDebugBreak,
 				memcmp: memcmp,
+				sleep:  sleep,
+				wake:   atomicInstance.exports.wake,
 				wait:   atomicInstance.exports.wait,
 				lock:   atomicInstance.exports.lock,
 				unlock: atomicInstance.exports.unlock,
-				sleep:  sleep,
+				get_worker_count: ()        => { debugger },
+				push_worker: (worker_index) => { debugger },
 			}
 		}
 	);
 
-	console.log("worker(%d): running", thread_index);
-	threadInstance.exports.worker_proc(thread_index);
+	mainInstance.exports.worker_main(worker_index);
 }

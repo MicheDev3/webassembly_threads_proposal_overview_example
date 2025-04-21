@@ -1,63 +1,79 @@
 #import "Basic";
 
-#load "common.jai";
-
-wait   :: (address: *s64) #foreign;
-lock   :: (address: *s64) #foreign;
-unlock :: (address: *s64) #foreign;
-sleep  :: (ms: float)     #foreign;
-
-WORKERS: [..]Worker;
-
-#program_export
-init_workers :: (worker_count: s64) -> []Worker #c_call
+Worker :: struct
 {
-	new_context: #Context;
-	push_context new_context
+	index:       s64;
+	mutex:      *s64;
+	semaphore:  *s64;
+}
+
+init_workers :: () -> []Worker
+{
+	assert(!INITTED);
+
+	count := get_worker_count();
+	print("spawing % workers\n", count);
+	for 0..count-1
 	{
-		print("spawing % workers", worker_count);
-		for 0..worker_count
-		{
-			worker: Worker;
-			worker.mutex     = New(s64);
-			worker.semaphore = New(s64);
-			worker.semaphore.* = 1;
-			
-			array_add(*WORKERS, worker);
-		}
+		worker: Worker;
+		worker.index     = it;
+		worker.mutex     = New(s64);
+		worker.semaphore = New(s64);
+		worker.semaphore.* = 1;
+		
+		array_add(*WORKERS, worker);
+		
+		push_worker(it);
 	}
 
+	INITTED = true;
 	result := WORKERS;
 	return result;
 }
 
+fini_workers :: ()
+{
+	assert(INITTED);
+	
+	SHOULD_EXIT = true;
+	for *worker: WORKERS
+	{
+		wake(worker.semaphore);
+	}
+}
+
 #program_export
-worker_proc :: (worker_index: s32) #c_call
+worker_main :: (index: s64) #c_call
 {
 	new_context: #Context;
 	push_context new_context
 	{
-		worker := WORKERS[worker_index];
+		worker := WORKERS[index];
+		print("worker(%): running\n", index);
 		// TODO: Probably have a fence here
-		while !worker.should_exit
+		while !SHOULD_EXIT
 		{
-			print("worker(%): waiting for work", worker_index);
+			print("worker(%): waiting for work\n", worker.index);
 			wait(worker.semaphore);
-			
-			if worker.should_exit { break; }
-			
-			print("worker(%): requesting lock", worker_index);
+			if SHOULD_EXIT { break; }
+	
+			print("worker(%): requesting lock\n", worker.index);
 			lock(worker.mutex);
-			print("worker(%): computing work", worker_index);
-			sleep(1000);
+			worker_proc(worker);
 			unlock(worker.mutex);
-			print("worker(%): unlocked", worker_index);
+			print("worker(%): unlocked\n", worker.index);
 		}
+		
+		print("worker(%): exiting\n", index);
 	}
 }
 
-// TODO: Is there a way to avoid to have a main
-main :: ()
-{
-	
-}
+#scope_file
+
+get_worker_count :: () -> s64    #foreign;
+push_worker      :: (index: s64) #foreign;
+
+INITTED     := false;
+SHOULD_EXIT := false;
+
+WORKERS: [..]Worker;

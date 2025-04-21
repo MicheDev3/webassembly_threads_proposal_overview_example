@@ -1,6 +1,7 @@
-Worker :: struct
-{
-	should_exit: bool;
-	mutex:      *s64;
-	semaphore:  *s64;
-}
+
+wake   :: (address: *s64) #foreign;
+wait   :: (address: *s64) #foreign;
+lock   :: (address: *s64) #foreign;
+unlock :: (address: *s64) #foreign;
+// TODO: Sleep is not working???
+sleep  :: (ms: float)     #foreign;
