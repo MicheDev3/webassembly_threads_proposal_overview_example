@@ -1,4 +1,4 @@
-import { sleep, jaiTojsString, wasmDebugBreak, writeToConsoleLog } from "/js/common.js";
+import { jaiTojsString, wasmDebugBreak, writeToConsoleLog } from "/js/common.js";
 
 async function run(modules)
 {
@@ -40,15 +40,14 @@ async function run(modules)
 				wasm_write_string: wasmWriteString,
 				wasm_debug_break:  wasmDebugBreak,
 				memcmp: memcmp,
-				sleep:  sleep,
+				sleep:  atomicInstance.exports.sleep,
 				wake:   atomicInstance.exports.wake,
 				wait:   atomicInstance.exports.wait,
 				lock:   atomicInstance.exports.lock,
 				unlock: atomicInstance.exports.unlock,
 				get_worker_count: () =>
 				{
-					// const workerCount = window.navigator.hardwareConcurrency - 1;
-					const workerCount = 2;
+					const workerCount = window.navigator.hardwareConcurrency - 1;
 					
 					return BigInt(workerCount);
 				},

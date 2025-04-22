@@ -14,6 +14,7 @@
 WASM_MEMORY_PAGE_SIZE :: #run KIBIBYTES(64);
 
 // This wat file will define shared elements (like memory) for the workers/main thread
+// This must be made in wasm in order to use 64bit memory address space
 WAT_SHARED_FILE_CONTENT :: #string DONE
 (module
 	(memory (export "memory") i64 %1 %1 shared)
@@ -57,6 +58,18 @@ WAT_ATOMIC_FILE_CONTENT :: #string DONE
 	        )
   	)
   	;;)
+  	
+  	(func $sleep (export "sleep")
+  		(param $address i64)
+  		(param $timeout i64)
+	        (drop
+	        	(call $wait 
+	        		(local.get $address)
+					(i64.const 0)
+					(local.get $timeout)
+	        	)
+	    	)
+  	)
 
   	;; Wake up a thread for work by signaling their semaphore
   	(func (export "wake")
@@ -79,13 +92,13 @@ WAT_ATOMIC_FILE_CONTENT :: #string DONE
   	;; Stop a thread indefinitely for work
   	(func (export "wait")
   		(param $address i64)
-  			(drop
+			(drop
 				(i64.atomic.rmw.sub
-  					(local.get $address)
-  					(i64.const 1)
-  				)
-  			)
-  			
+					(local.get $address)
+					(i64.const 1)
+				)
+			)
+				
 	        (drop
 	        	(call $wait 
 	        		(local.get $address)
@@ -94,7 +107,6 @@ WAT_ATOMIC_FILE_CONTENT :: #string DONE
 	        	)
 	    	)
   	)
-  	
 
   	;; Lock a mutex at the given address, retrying until successful.
   	(func (export "lock") 

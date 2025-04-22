@@ -4,22 +4,19 @@
 #load "common.jai";
 #load "thread.jai";
 
-worker_proc :: (worker: Worker)
+worker_proc :: (worker: *Worker)
 {
-	print("worker(%): doing some work\n", worker.index);
-	sleep(1000);
+	sleep(worker, 5000);
 }
 
 main :: ()
 {
 	workers := init_workers();
 	
-	// print("Start Sleeping\n");
-	// sleep(1000);
-	// print("Done Sleeping\n");
-	
-	worker := *workers[0];
-	wake(worker.semaphore);
+	worker0 := *workers[0];
+	worker1 := *workers[1];
+	wake(worker0.semaphore);
+	wake(worker0.semaphore);
 	
 	// fini_workers();
 	

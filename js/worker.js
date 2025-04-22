@@ -1,4 +1,4 @@
-import { sleep, jaiTojsString, wasmDebugBreak, writeToConsoleLog } from "/js/common.js";
+import { jaiTojsString, wasmDebugBreak, writeToConsoleLog } from "/js/common.js";
 
 onmessage = async function(message)
 {
@@ -39,7 +39,7 @@ onmessage = async function(message)
 				wasm_write_string: wasmWriteString,
 				wasm_debug_break:  wasmDebugBreak,
 				memcmp: memcmp,
-				sleep:  sleep,
+				sleep:  atomicInstance.exports.sleep,
 				wake:   atomicInstance.exports.wake,
 				wait:   atomicInstance.exports.wait,
 				lock:   atomicInstance.exports.lock,
