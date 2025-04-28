@@ -505,7 +505,7 @@ build_main ::
 					}
 				];
 				
-				print("\nSelected % (64Kib) memory pages\n", nr_pages);
+				print("\nSelected % memory pages (64Kib per page)\n", nr_pages);
 				print("WASM compiler: \"%\"\n", wasm_compiler_path);
 				
 				for wat_files
@@ -575,7 +575,7 @@ build_main ::
 	js_output_path := "../js/";
 	wat_output_path := "../wat/";
 	wasm_output_path := "../public/";
-	for string.[wat_output_path, wasm_output_path]
+	for string.[wat_output_path, wasm_output_path, js_output_path]
 	{
 		if !make_directory_if_it_does_not_exist(it)
 		{

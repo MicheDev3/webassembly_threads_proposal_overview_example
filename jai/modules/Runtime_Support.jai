@@ -72,7 +72,8 @@ write_nonnegative_number :: (n: u64, base := 10, to_standard_error := false) #no
 
 write_number :: (n: s64, base := 10, to_standard_error := false) #no_context #no_aoc
 {
-	if n < 0 {
+	if n < 0 
+	{
 		write_string("-", to_standard_error);
 		n = -n;  // Will overflow if this is the most negative s64.
 	}
@@ -327,9 +328,6 @@ write_string :: (s: string, to_standard_error := false) #no_context #compiler
 	// involves a different implementation that also syncs with the compiler's output.
 	// This runtime version of write_string is just about syncing the threads
 	// in your own program.
-	
-	one_time_init(*synch_initted, init_synchronization());
-	
 	runtime_support_acquire(*write_string_lock);
 	write_string_unsynchronized(s, to_standard_error);
 	runtime_support_release(*write_string_lock);
@@ -341,9 +339,6 @@ write_strings :: (strings: ..string, to_standard_error := false) #no_context #co
 	// involves a different implementation that also syncs with the compiler's output.
 	// This runtime version of write_strings is just about syncing the threads
 	// in your own program.
-	
-	one_time_init(*synch_initted, init_synchronization());
-	
 	runtime_support_acquire(*write_string_lock);
 	for strings write_string_unsynchronized(it, to_standard_error);
 	runtime_support_release(*write_string_lock);
@@ -376,7 +371,8 @@ __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, file
 	my_panic();
 }
 
-#if DEFINE_INITIALIZATION {
+#if DEFINE_INITIALIZATION 
+{
 	// TEMPORARY_STORAGE_SIZE is defined by the compiler based on Build_Options.
 	
 	first_thread_context: #Context;
@@ -468,7 +464,8 @@ one_time_init :: (synch_value: *s32, to_insert: Code) #expand
 // procedures, for example). Context_Base is going to be annoying to edit because
 // if you make an error of some kind, even a simple one like an undeclared identifier,
 // you won't get a helpful error message.
-Context_Base :: struct {
+Context_Base :: struct 
+{
 	context_info:  *Type_Info_Struct; // Allow libs or DLLs to see what context we are passing them. Will always be initialized to type_of(Context).
 	
 	thread_index   : u32;
@@ -528,15 +525,7 @@ set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
 
 #scope_module
 
-init_synchronization :: () #no_context
-{
-	// For now, we do not bother to destroy write_string_lock, etc
-	// on shutdown.
-	
-	// TODO: Write for wasm
-}
-
-// Let the user fill this in, if desired.
+// TODO: Should I implement these?
 write_string_lock: void;
 runtime_support_acquire :: (lock: *$T) #no_context #expand {}
 runtime_support_release :: (lock: *$T) #no_context #expand {}
