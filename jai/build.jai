@@ -13,16 +13,6 @@
 
 WASM_MEMORY_PAGE_SIZE :: #run KIBIBYTES(64);
 
-// This wat file will define shared elements (like memory) for the workers/main thread
-// This must be made in wasm in order to use 64bit memory address space
-WAT_SHARED_FILE_CONTENT :: #string DONE
-(module
-	(memory (export "memory") i64 %1 %1 shared)
-	
-	;; TODO: Implement here memset
-)
-DONE;
-
 // This wat file will define the atomics operations for multithreading
 WAT_ATOMIC_FILE_CONTENT :: #string DONE
 (module
@@ -167,6 +157,199 @@ WAT_ATOMIC_FILE_CONTENT :: #string DONE
 )
 DONE;
 
+MAIN_JS_FILE_CONTENT :: #string DONE
+async function main()
+{
+	if (window.crossOriginIsolated)
+	{
+		const atomicUri = "/public/atomic.wasm";
+		const mainUri   = "/public/main.wasm"  ;
+		Promise.all(
+			[
+				WebAssembly.compileStreaming(fetch(atomicUri)),
+				WebAssembly.compileStreaming(fetch(mainUri  )),
+			]
+		)
+		.then ( async (modules) => 
+		{
+			const atomicModule = modules[0];
+			const mainModule   = modules[1];
+			
+			const memory = new WebAssembly.Memory
+			(
+				{
+					"initial": BigInt(%1),
+					"maximum": BigInt(%1),
+					"shared": true,
+					"address": "i64"
+				}
+			);
+			
+			const workers  = [];
+			// const workerCount = window.navigator.hardwareConcurrency;
+			const workerCount = 2;
+			for (let i = 0; i < workerCount; i++)
+			{
+				// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
+				const worker = new Worker("/js/worker.js", { type: "module" });
+				workers.push(
+					new Promise(
+						(resolve) =>
+						{
+							worker.postMessage(
+								{
+									modules: [atomicModule, mainModule],
+									imports: {env: {memory: memory}},
+									worker_index: i,
+								}
+							);
+							worker.onmessage = (event) => resolve(event.data);
+							worker.onerror   = reject;
+						}
+					)
+				);
+			}
+			
+			// TODO: Understand why this is not triggered
+			await Promise.all(workers)
+			.then(function(data)
+				{
+					console.log("All workers terminated");
+				}
+			)
+			.catch(function(error)
+				{
+					// something went wrong
+				}
+			);
+		})
+		.catch( (err)     => { console.error(err); } )
+		;
+	}
+	else
+	{
+		console.error("window.crossOriginIsolated return false. Start the server with ./server_start.sh");
+	}
+}
+
+main();
+
+DONE;
+
+WORKER_JS_FILE_CONTENT :: #string DONE
+// console.log and console.error always add newlines so we need to buffer the output from write_string
+// to simulate a more basic I/O behavior. We’ll flush it after a certain time so that you still
+// see the last line if you forget to terminate it with a newline for some reason.
+let consoleBuffer = "";
+let consoleBufferIsStandardError;
+let consoleTimeout;
+const FLUSH_CONSOLE_AFTER_MS = 3;
+
+function writeToConsoleLog(str, to_standard_error)
+{
+	if (consoleBuffer && consoleBufferIsStandardError != to_standard_error)
+	{
+		flushBuffer();
+	}
+	
+	consoleBufferIsStandardError = to_standard_error;
+	const lines = str.split("\n");
+	for (let i = 0; i < lines.length - 1; i++)
+	{
+		consoleBuffer += lines[i];
+		flushBuffer();
+	}
+	
+	consoleBuffer += lines[lines.length - 1];
+	
+	clearTimeout(consoleTimeout);
+	if (consoleBuffer)
+	{
+		consoleTimeout = setTimeout(() => {
+			flushBuffer();
+		}, FLUSH_CONSOLE_AFTER_MS);
+	}
+	
+	function flushBuffer()
+	{
+		if (!consoleBuffer) return;
+		
+		if (consoleBufferIsStandardError)
+		{
+			console.error(consoleBuffer);
+		}
+		else
+		{
+			console.log(consoleBuffer);
+		}
+		
+		consoleBuffer = "";
+	}
+}
+
+// TODO: Properly understand this
+function jaiTojsString(buffer, pointer, length)
+{
+	const u8 = new Uint8Array(buffer)
+	const bytes = u8.subarray(Number(pointer), Number(pointer) + Number(length));
+	
+	// Create a temporary ArrayBuffer and copy the contents of the shared buffer
+	// into it.
+	const tempBuffer = new ArrayBuffer(Number(length));
+	const tempView = new Uint8Array(tempBuffer);
+	tempView.set(bytes);
+	
+	const decoder = new TextDecoder();
+	return decoder.decode(tempBuffer);
+}
+
+onmessage = async function(message)
+{
+	const { modules, imports, worker_index} = message.data;
+	
+	const atomicModule = modules[0];
+	const mainModule   = modules[1];
+	
+	const memory = imports["env"]["memory"];
+	const atomicInstance = new WebAssembly.Instance(atomicModule, imports);
+	const mainInstance = new WebAssembly.Instance(mainModule,
+		{
+			env:
+			{
+				memory: memory,
+				memcmp: (lhs, rhs, size) => 
+				{
+					// https://discord.com/channels/661732390355337246/1172463903943446548/1256763226847187127
+					// https://www.tutorialspoint.com/c_standard_library/c_function_memcmp.htm
+					const str1 = jaiTojsString(memory.buffer, lhs, size);
+					const str2 = jaiTojsString(memory.buffer, rhs, size);
+					if (str1 == str2)    { return  0; }
+					if (!(str1 && str2)) { return -1; }
+					if (str1 < str2)     { return -1; }
+					if (str1 > str2)     { return  1; }
+					
+					return -1;
+				},
+				wasm_write_string: (count, data, toStandardError) =>
+				{
+					const value = jaiTojsString(memory.buffer, data, count);
+					writeToConsoleLog(value, toStandardError);
+				},
+				wasm_debug_break: () => { debugger },
+				wasm_sleep:  atomicInstance.exports.sleep,
+				wasm_wake:   atomicInstance.exports.wake,
+				wasm_wait:   atomicInstance.exports.wait,
+				wasm_lock:   atomicInstance.exports.lock,
+				wasm_unlock: atomicInstance.exports.unlock,
+			}
+		}
+	);
+
+	mainInstance.exports.worker_main(BigInt(worker_index));
+}
+
+DONE;
+
 /////////////////////////////
 
 
@@ -194,6 +377,12 @@ WatToWasmTarget :: struct
 	dst:   string;
 	data:  string;
 	flags: []string;
+}
+
+JsSource :: struct
+{
+	dst:  string;
+	data: string;
 }
 
 /////////////////////////////
@@ -243,6 +432,7 @@ build_main ::
 	wasm_compiler_path: string,
 	wat_output_path: string,
 	wasm_output_path: string,
+	js_output_path: string,
 	nr_pages: int
 )
 {
@@ -251,7 +441,7 @@ build_main ::
 	child_options := get_build_options(w);
 	copy_commonly_propagated_fields(parent_options, *child_options);
 	
-	child_options.output_type                         = .EXECUTABLE;
+	child_options.output_type                         = .DYNAMIC_LIBRARY;
 	child_options.backend                             = .LLVM;
 	child_options.os_target                           = .WASM;
 	child_options.cpu_target                          = .CUSTOM;
@@ -262,6 +452,7 @@ build_main ::
 	// +bulk-memory: will map "memcpy" to "memory.copy" and "memset" to "memory.fill".
 	// +atomics    : necessary for setting "--shared-memory" linker flag.
 	child_options.llvm_options.target_system_features = "+bulk-memory,+atomics";
+	// child_options.llvm_options.target_system_features = "+bulk-memory,+atomics,+mutable-globals";
 	child_options.llvm_options.enable_split_modules   = false;
 	child_options.llvm_options.function_sections      = true; // To get around "LLVM ERROR: section already has a defining function: .text"
 	
@@ -279,6 +470,10 @@ build_main ::
 	walloc_object_file_path := "modules/Walloc/walloc.o";
 	memory_size := nr_pages*WASM_MEMORY_PAGE_SIZE;
 	child_options.additional_linker_arguments = .[
+		// "-r",
+		// "--export-all",
+		// "--shared",
+		"--no-entry",
 		"--import-memory", // memory will be created statically in the memory.wat file and shared with workers and main thread
 		"--shared-memory", // memory must be sharable in order for workers and main thread to work on the same chunk of memory (default behavior is copying from/to worker-main boundaries)
 		tprint("--initial-memory=%", memory_size), // shared memory is fixed (cannot grow at runtime) so we must specify the initial number pages available
@@ -301,13 +496,7 @@ build_main ::
 		{
 			case .COMPLETE;
 			{
-				files: []WatToWasmTarget = .[
-					.{
-						tprint("%/shared.wat", wat_output_path),
-						tprint("%/shared.wasm", wasm_output_path),
-						tprint(WAT_SHARED_FILE_CONTENT, nr_pages),
-						string.[],
-					},
+				wat_files: []WatToWasmTarget = .[
 					.{
 						tprint("%/atomic.wat", wat_output_path),
 						tprint("%/atomic.wasm", wasm_output_path),
@@ -319,7 +508,7 @@ build_main ::
 				print("\nSelected % (64Kib) memory pages\n", nr_pages);
 				print("WASM compiler: \"%\"\n", wasm_compiler_path);
 				
-				for files
+				for wat_files
 				{
 					if !write_entire_file(it.src, it.data)
 					{
@@ -343,9 +532,31 @@ build_main ::
 				}
 				
 				print("Generated and compiled wat files:\n");
-				for files
+				for wat_files
 				{
 					print("     - from '%' to '%'\n", it.src, it.dst);
+				}
+				
+				print("Generated js files:\n");
+				for JsSource.[
+					.{
+						tprint("%/main.js", js_output_path),
+						tprint(MAIN_JS_FILE_CONTENT, nr_pages)
+					},
+					.{
+						tprint("%/worker.js", js_output_path),
+						WORKER_JS_FILE_CONTENT,
+					}
+				]
+				{
+					if write_entire_file(it.dst, it.data)
+					{
+						print("     - '%'\n", it.dst);
+					}
+					else
+					{
+						compiler_report(tprint("Failed to generate '%'", it.dst));
+					}
 				}
 				
 				break;
@@ -361,6 +572,7 @@ build_main ::
 	w := get_current_workspace();
 	parent_options := get_build_options(w);
 	
+	js_output_path := "../js/";
 	wat_output_path := "../wat/";
 	wasm_output_path := "../public/";
 	for string.[wat_output_path, wasm_output_path]
@@ -383,7 +595,7 @@ build_main ::
 		}
 	}
 	
-	build_main(parent_options, wasm_compiler_path, wat_output_path, wasm_output_path, nr_pages);
+	build_main(parent_options, wasm_compiler_path, wat_output_path, wasm_output_path, js_output_path, nr_pages);
 	
 	set_build_options_dc(.{do_output = false}, w);
 }

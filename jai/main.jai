@@ -1,43 +1,16 @@
-#import "Basic";
-#import "Random";
-
 #load "common.jai";
 #load "thread.jai";
 
+COUNTER := 5;
+
+main_proc :: (worker: *Worker)
+{
+	COUNTER -= 1;
+	sleep(worker, 1000);
+	if COUNTER == 0 { terminate_workers(); }
+}
+
 worker_proc :: (worker: *Worker)
 {
-	sleep(worker, 5000);
+	sleep(worker, 1000);
 }
-
-main :: ()
-{
-	workers := init_workers();
-	
-	worker0 := *workers[0];
-	worker1 := *workers[1];
-	wake(worker0.semaphore);
-	wake(worker0.semaphore);
-	
-	// fini_workers();
-	
-	// for 0..4
-	// {
-	// 	index := random_get() % cast(u64)workers.count;
-	// 	worker := *workers[index];
-	// 	wake(worker.semaphore);
-	// 	sleep(5000);
-	// }
-	
-	// sleep(1000);
-	
-	// for *(workers)
-	// {
-	// 	it.should_exit = true;
-	// 	wake(it.semaphore);
-	// }
-}
-
-
-
-
-

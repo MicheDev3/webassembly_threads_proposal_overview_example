@@ -1,4 +1,4 @@
-#import "Basic";
+#add_context worker_group: *WorkerGroup;
 
 Worker :: struct
 {
@@ -9,44 +9,25 @@ Worker :: struct
 	sentinel:   *s64;
 }
 
-init_workers :: () -> []Worker
+WorkerGroup :: struct
 {
-	assert(!INITTED);
-
-	// count := get_worker_count();
-	count := 2;
+	workers: Array(Worker, 32);
 	
-	print("spawing % workers\n", count);
-	for 1..count
-	{
-		worker: Worker;
-		worker.index     = it;
-		worker.mutex     = New(s64);
-		worker.semaphore = New(s64);
-		worker.sentinel  = New(s64);
-
-		worker.semaphore.* = 1;
-		
-		array_add(*WORKERS, worker);
-		
-		push_worker(it);
-	}
-
-	INITTED = true;
-	result := WORKERS;
-	return result;
+	should_exit: bool;
 }
 
-fini_workers :: ()
+terminate_workers :: ()
 {
-	assert(INITTED);
-	
-	SHOULD_EXIT = true;
-	for *worker: WORKERS
+	group := context.worker_group;
+
+	group.should_exit = true;
+	for *worker: group.workers
 	{
-		wake(worker.semaphore);
+		wasm_wake(worker.semaphore);
 	}
 }
+
+#scope_file
 
 #program_export
 worker_main :: (index: s64) #c_call
@@ -54,33 +35,50 @@ worker_main :: (index: s64) #c_call
 	new_context: #Context;
 	push_context new_context
 	{
-		worker := *WORKERS[index-1];
-		print("worker(%): running\n", worker.index);
-		// TODO: Probably have a fence here
-		while !SHOULD_EXIT
-		{
-			print("worker(%): waiting for work\n", worker.index);
-			wait(worker.semaphore);
-			assert(worker.semaphore.* >= 0);
-			if SHOULD_EXIT { break; }
-	
-			print("worker(%): locking\n", worker.index);
-			lock(worker.mutex);
-			worker_proc(worker);
-			unlock(worker.mutex);
-			print("worker(%): unlocking\n", worker.index);
-		}
+		group := context.worker_group;
+
+		worker := insert(*group.workers, .{});
+		worker.index     = index;
+		worker.mutex     = NEW(s64);
+		worker.semaphore = NEW(s64);
+		worker.sentinel  = NEW(s64);
 		
-		print("worker(%): exiting\n", index);
+		worker.semaphore.* = 1;
+
+		// TODO: Probably have a fence here?
+		if index == 0
+		{
+			pre_message := "Main: pre wasm\n";
+			wasm_write_string(pre_message.count, pre_message.data, false);
+			
+			while !WORKER_GROUP.should_exit
+			{
+
+				main_proc(worker,, worker_group=*WORKER_GROUP);
+			}
+			
+			post_message := "Main: post wasm\n";
+			wasm_write_string(post_message.count, post_message.data, false);
+		}
+		else
+		{
+			pre_message := "Worker: pre wasm\n";
+			wasm_write_string(pre_message.count, pre_message.data, false);
+
+			while !WORKER_GROUP.should_exit
+			{
+				wasm_wait(worker.semaphore);
+				if WORKER_GROUP.should_exit { break; }
+				
+				wasm_lock(worker.mutex);
+				worker_proc(worker);
+				wasm_unlock(worker.mutex);
+			}
+			
+			post_message := "Worker: post wasm\n";
+			wasm_write_string(post_message.count, post_message.data, false);
+		}
 	}
 }
 
-#scope_file
-
-get_worker_count :: () -> s64    #foreign;
-push_worker      :: (index: s64) #foreign;
-
-INITTED     := false;
-SHOULD_EXIT := false;
-
-WORKERS: [..]Worker;
+WORKER_GROUP: WorkerGroup;
