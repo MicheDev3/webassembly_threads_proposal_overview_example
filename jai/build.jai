@@ -11,7 +11,8 @@
 // Costants
 /////////////////////////////
 
-WASM_MEMORY_PAGE_SIZE :: #run KIBIBYTES(64);
+WASM_MEMORY_STACK_SIZE :: #run MEBIBYTES(01);
+WASM_MEMORY_PAGE_SIZE  :: #run KIBIBYTES(64);
 
 // This wat file will define the atomics operations for multithreading
 WAT_ATOMIC_FILE_CONTENT :: #string DONE
@@ -451,7 +452,9 @@ build_main ::
 	child_options.output_executable_name              = "main";
 	// +bulk-memory: will map "memcpy" to "memory.copy" and "memset" to "memory.fill".
 	// +atomics    : necessary for setting "--shared-memory" linker flag.
+	// https://github.com/WebAssembly/tool-conventions/blob/main/Linking.md
 	child_options.llvm_options.target_system_features = "+bulk-memory,+atomics";
+	// child_options.llvm_options.target_system_features = "+bulk-memory,+atomics,+multimemory,+multivalue";
 	// child_options.llvm_options.target_system_features = "+bulk-memory,+atomics,+mutable-globals";
 	child_options.llvm_options.enable_split_modules   = false;
 	child_options.llvm_options.function_sections      = true; // To get around "LLVM ERROR: section already has a defining function: .text"
@@ -469,11 +472,23 @@ build_main ::
 	//  -rluba, 2023-11-15
 	walloc_object_file_path := "modules/Walloc/walloc.o";
 	memory_size := nr_pages*WASM_MEMORY_PAGE_SIZE;
+	assert(memory_size > WASM_MEMORY_STACK_SIZE);
 	child_options.additional_linker_arguments = .[
 		// "-r",
 		// "--export-all",
 		// "--shared",
 		"--no-entry",
+		// "--strip-all",
+		// "--export-dynamic",
+		// "--import-table",
+		// "--pie",
+		// "--export=__heap_base",
+		// "--stack-first",
+		// "--allow-undefined",
+		// "-shared",
+		"--experimental-pic",
+		"--unresolved-symbols=import-dynamic",
+		"-z", tprint("stack-size=%", WASM_MEMORY_STACK_SIZE),
 		"--import-memory", // memory will be created statically in the memory.wat file and shared with workers and main thread
 		"--shared-memory", // memory must be sharable in order for workers and main thread to work on the same chunk of memory (default behavior is copying from/to worker-main boundaries)
 		tprint("--initial-memory=%", memory_size), // shared memory is fixed (cannot grow at runtime) so we must specify the initial number pages available
@@ -583,7 +598,7 @@ build_main ::
 		}
 	}
 	
-	nr_pages := 100;
+	nr_pages := 1000;
 	wasm_compiler_path := "wat2wasm";
 	args := parent_options.compile_time_command_line;
 	for args

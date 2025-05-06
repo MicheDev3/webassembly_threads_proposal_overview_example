@@ -53,7 +53,6 @@ worker_main :: (index: s64) #c_call
 			
 			while !WORKER_GROUP.should_exit
 			{
-
 				main_proc(worker,, worker_group=*WORKER_GROUP);
 			}
 			

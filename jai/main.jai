@@ -6,6 +6,8 @@ COUNTER := 5;
 main_proc :: (worker: *Worker)
 {
 	COUNTER -= 1;
+	// pre_message := "Main: sleeping\n";
+	// wasm_write_string(pre_message.count, pre_message.data, false);
 	sleep(worker, 1000);
 	if COUNTER == 0 { terminate_workers(); }
 }

@@ -328,9 +328,9 @@ write_string :: (s: string, to_standard_error := false) #no_context #compiler
 	// involves a different implementation that also syncs with the compiler's output.
 	// This runtime version of write_string is just about syncing the threads
 	// in your own program.
-	runtime_support_acquire(*write_string_lock);
+	wasm_lock(*write_string_lock);
 	write_string_unsynchronized(s, to_standard_error);
-	runtime_support_release(*write_string_lock);
+	wasm_unlock(*write_string_lock);
 }
 
 write_strings :: (strings: ..string, to_standard_error := false) #no_context #compiler
@@ -339,9 +339,9 @@ write_strings :: (strings: ..string, to_standard_error := false) #no_context #co
 	// involves a different implementation that also syncs with the compiler's output.
 	// This runtime version of write_strings is just about syncing the threads
 	// in your own program.
-	runtime_support_acquire(*write_string_lock);
+	wasm_lock(*write_string_lock);
 	for strings write_string_unsynchronized(it, to_standard_error);
-	runtime_support_release(*write_string_lock);
+	wasm_unlock(*write_string_lock);
 }
 
 #scope_module;
@@ -398,13 +398,7 @@ __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, file
 		
 		return *first_thread_context;
 	}
-	
-	#program_export
-	__jai_runtime_fini :: (_context: *void) #c_call {}
 }
-
-__instrumentation_first  :: () {}
-__instrumentation_second :: () {}
 
 #scope_module;
 
@@ -417,9 +411,6 @@ __instrumentation_second :: () {}
 		
 		push_context first_thread_context
 		{
-			__instrumentation_first ();
-			__instrumentation_second();
-			
 			__program_main :: () #entry_point;
 			no_inline __program_main();
 		}
@@ -526,8 +517,6 @@ set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
 #scope_module
 
 // TODO: Should I implement these?
-write_string_lock: void;
+write_string_lock: s64;
 runtime_support_acquire :: (lock: *$T) #no_context #expand {}
 runtime_support_release :: (lock: *$T) #no_context #expand {}
-
-synch_initted: s32 = 0;
