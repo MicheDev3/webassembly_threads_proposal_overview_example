@@ -176,11 +176,14 @@ async function main()
 			const atomicModule = modules[0];
 			const mainModule   = modules[1];
 			
+			const memory_size = BigInt(%1);
+			const stack_size  = BigInt(%2);
+			
 			const memory = new WebAssembly.Memory
 			(
 				{
-					"initial": BigInt(%1),
-					"maximum": BigInt(%1),
+					"initial": memory_size,
+					"maximum": memory_size,
 					"shared": true,
 					"address": "i64"
 				}
@@ -188,7 +191,7 @@ async function main()
 			
 			const workers  = [];
 			// const workerCount = window.navigator.hardwareConcurrency;
-			const workerCount = 2;
+			const workerCount = 3;
 			for (let i = 0; i < workerCount; i++)
 			{
 				// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
@@ -197,13 +200,16 @@ async function main()
 					new Promise(
 						(resolve) =>
 						{
-							worker.postMessage(
-								{
-									modules: [atomicModule, mainModule],
-									imports: {env: {memory: memory}},
-									worker_index: i,
-								}
-							);
+							const data = 
+							{
+								modules: [atomicModule, mainModule],
+								imports: {env: {memory: memory}},
+								worker_index: i,
+								stack_pointer: stack_size - BigInt(i)*BigInt(5000),
+								stack_high:    stack_size - BigInt(i)*BigInt(5000),
+								stack_low:     stack_size - BigInt(i)*BigInt(10000),
+							}
+							worker.postMessage(data);
 							worker.onmessage = (event) => resolve(event.data);
 							worker.onerror   = reject;
 						}
@@ -306,10 +312,15 @@ function jaiTojsString(buffer, pointer, length)
 
 onmessage = async function(message)
 {
-	const { modules, imports, worker_index} = message.data;
+	const { modules, imports, worker_index, stack_pointer, stack_high, stack_low } = message.data;
+	// const { modules, imports, worker_index } = message.data;
 	
 	const atomicModule = modules[0];
 	const mainModule   = modules[1];
+	
+	const __stack_pointer = new WebAssembly.Global({ value: "i64", mutable: true }, stack_pointer);
+	const __stack_high    = new WebAssembly.Global({ value: "i64", mutable: true }, stack_high);
+	const __stack_low     = new WebAssembly.Global({ value: "i64", mutable: true }, stack_low);
 	
 	const memory = imports["env"]["memory"];
 	const atomicInstance = new WebAssembly.Instance(atomicModule, imports);
@@ -342,6 +353,7 @@ onmessage = async function(message)
 				wasm_wait:   atomicInstance.exports.wait,
 				wasm_lock:   atomicInstance.exports.lock,
 				wasm_unlock: atomicInstance.exports.unlock,
+				__stack_pointer, __stack_high, __stack_low
 			}
 		}
 	);
@@ -467,9 +479,8 @@ build_main ::
 	}
 	child_options.import_path = import_paths;
 	
-	// This was compiled from https://github.com/wingo/walloc via "clang -Oz --target=wasm64 -nostdlib -c -o walloc.o walloc.c".
-	// We should probably port this allocator to Jai instead…
-	//  -rluba, 2023-11-15
+	// old "clang       -Oz --target=wasm64 -nostdlib -c -o walloc.o walloc.c".
+	// new "clang -fPIC -Oz --target=wasm64 -nostdlib -c -o walloc.o walloc.c".
 	walloc_object_file_path := "modules/Walloc/walloc.o";
 	memory_size := nr_pages*WASM_MEMORY_PAGE_SIZE;
 	assert(memory_size > WASM_MEMORY_STACK_SIZE);
@@ -486,16 +497,19 @@ build_main ::
 		// "--stack-first",
 		// "--allow-undefined",
 		// "-shared",
-		"--experimental-pic",
-		"--unresolved-symbols=import-dynamic",
+		// "--global-base=10",
+		// "--experimental-pic",
+		// "--unresolved-symbols=import-dynamic",
 		"-z", tprint("stack-size=%", WASM_MEMORY_STACK_SIZE),
 		"--import-memory", // memory will be created statically in the memory.wat file and shared with workers and main thread
 		"--shared-memory", // memory must be sharable in order for workers and main thread to work on the same chunk of memory (default behavior is copying from/to worker-main boundaries)
 		tprint("--initial-memory=%", memory_size), // shared memory is fixed (cannot grow at runtime) so we must specify the initial number pages available
 		tprint("--max-memory=%",     memory_size), // shared memory is fixed (cannot grow at runtime) so we must specify the maximum number pages available
-		walloc_object_file_path
+		"--error-limit=0",
+		walloc_object_file_path,
 	];
 	
+	// set_optimization(*child_options, .VERY_OPTIMIZED);
 	set_build_options(child_options, w);
 	// Replace the default allocator with Walloc (https://github.com/wingo/walloc).
 	remap_import(w, "*", "Default_Allocator", "Walloc");
@@ -513,8 +527,8 @@ build_main ::
 			{
 				wat_files: []WatToWasmTarget = .[
 					.{
-						tprint("%/atomic.wat", wat_output_path),
-						tprint("%/atomic.wasm", wasm_output_path),
+						tprint("%atomic.wat",  wat_output_path),
+						tprint("%atomic.wasm", wasm_output_path),
 						tprint(WAT_ATOMIC_FILE_CONTENT, nr_pages),
 						string.[],
 					}
@@ -555,11 +569,11 @@ build_main ::
 				print("Generated js files:\n");
 				for JsSource.[
 					.{
-						tprint("%/main.js", js_output_path),
-						tprint(MAIN_JS_FILE_CONTENT, nr_pages)
+						tprint("%main.js", js_output_path),
+						tprint(MAIN_JS_FILE_CONTENT, nr_pages, WASM_MEMORY_STACK_SIZE)
 					},
 					.{
-						tprint("%/worker.js", js_output_path),
+						tprint("%worker.js", js_output_path),
 						WORKER_JS_FILE_CONTENT,
 					}
 				]
@@ -587,9 +601,10 @@ build_main ::
 	w := get_current_workspace();
 	parent_options := get_build_options(w);
 	
-	js_output_path := "../js/";
-	wat_output_path := "../wat/";
-	wasm_output_path := "../public/";
+	_, project_folder := split_from_right(#filepath, "jai");
+	js_output_path   := tprint("%js/",     project_folder);
+	wat_output_path  := tprint("%wat/",    project_folder);
+	wasm_output_path := tprint("%public/", project_folder);
 	for string.[wat_output_path, wasm_output_path, js_output_path]
 	{
 		if !make_directory_if_it_does_not_exist(it)
@@ -627,5 +642,6 @@ build_main ::
 #import "Compiler";
 #import "File";
 #import "Process";
+#import "String";
 
 /////////////////////////////

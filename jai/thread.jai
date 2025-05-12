@@ -23,7 +23,13 @@ terminate_workers :: ()
 	group.should_exit = true;
 	for *worker: group.workers
 	{
-		wasm_wake(worker.semaphore);
+		if worker.index != 0
+		{
+			post_message := "Main: waking thread\n";
+			wasm_write_string(post_message.count, post_message.data, false);
+			
+			wasm_wake(worker.semaphore);
+		}
 	}
 }
 
@@ -34,17 +40,14 @@ worker_main :: (index: s64) #c_call
 {
 	new_context: #Context;
 	push_context new_context
-	{
-		group := context.worker_group;
+	{		
+		mutex := 0;
+		semaphore := 1;
+		sentinel  := 0;
 
-		worker := insert(*group.workers, .{});
-		worker.index     = index;
-		worker.mutex     = NEW(s64);
-		worker.semaphore = NEW(s64);
-		worker.sentinel  = NEW(s64);
+		insert(*WORKER_GROUP.workers, index, .{index, *mutex, *semaphore, *sentinel});
 		
-		worker.semaphore.* = 1;
-
+		worker := *WORKER_GROUP.workers[index];
 		// TODO: Probably have a fence here?
 		if index == 0
 		{
@@ -65,7 +68,7 @@ worker_main :: (index: s64) #c_call
 			wasm_write_string(pre_message.count, pre_message.data, false);
 
 			while !WORKER_GROUP.should_exit
-			{
+			{	
 				wasm_wait(worker.semaphore);
 				if WORKER_GROUP.should_exit { break; }
 				

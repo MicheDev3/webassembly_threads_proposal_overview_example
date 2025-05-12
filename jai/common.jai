@@ -66,20 +66,16 @@ NEW :: ($T: Type, initialized := true) -> *T #expand
     return cast(*T) memory;
 }
 
-advance :: inline (array: *$A/Array, amount: s64) -> s64
+insert :: inline (array: *$A/Array, index: s64) -> *array.T
 {
-    result := array.stored;
-    array.stored += amount;
-
+    result := *(array.*[index]);
+    array.stored += 1;
+    
     return result;
 }
 
-insert :: inline (array: *$A/Array, value: array.T) -> (result: *array.T, index: s64)
+insert :: inline (array: *$A/Array, index: s64, value: array.T)
 {
-    index := advance(array, 1);
     array.*[index] = value;
-    
-    result := *(array.*[index]);
-    
-    return result, index;
+    array.stored += 1;
 }
