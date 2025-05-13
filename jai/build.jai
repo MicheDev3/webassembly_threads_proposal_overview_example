@@ -191,9 +191,12 @@ async function main()
 			
 			const workers  = [];
 			// const workerCount = window.navigator.hardwareConcurrency;
-			const workerCount = 3;
+			const workerCount = 8;
+			var heap_end  = BigInt(%3);
 			for (let i = 0; i < workerCount; i++)
 			{
+				var heap_base = heap_end - BigInt((workerCount - i)*100000);
+
 				// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
 				const worker = new Worker("/js/worker.js", { type: "module" });
 				workers.push(
@@ -205,9 +208,11 @@ async function main()
 								modules: [atomicModule, mainModule],
 								imports: {env: {memory: memory}},
 								worker_index: i,
-								stack_pointer: stack_size - BigInt(i)*BigInt(5000),
-								stack_high:    stack_size - BigInt(i)*BigInt(5000),
-								stack_low:     stack_size - BigInt(i)*BigInt(10000),
+								stack_pointer: stack_size - BigInt(i*5000),
+								stack_high:    stack_size - BigInt(i*5000),
+								stack_low:     stack_size - BigInt(i*10000),
+								heap_base:     heap_base,
+								heap_end:      heap_end
 							}
 							worker.postMessage(data);
 							worker.onmessage = (event) => resolve(event.data);
@@ -215,6 +220,8 @@ async function main()
 						}
 					)
 				);
+				
+				heap_end = heap_base;
 			}
 			
 			// TODO: Understand why this is not triggered
@@ -312,8 +319,7 @@ function jaiTojsString(buffer, pointer, length)
 
 onmessage = async function(message)
 {
-	const { modules, imports, worker_index, stack_pointer, stack_high, stack_low } = message.data;
-	// const { modules, imports, worker_index } = message.data;
+	const { modules, imports, worker_index, stack_pointer, stack_high, stack_low, heap_base, heap_end } = message.data;
 	
 	const atomicModule = modules[0];
 	const mainModule   = modules[1];
@@ -321,7 +327,12 @@ onmessage = async function(message)
 	const __stack_pointer = new WebAssembly.Global({ value: "i64", mutable: true }, stack_pointer);
 	const __stack_high    = new WebAssembly.Global({ value: "i64", mutable: true }, stack_high);
 	const __stack_low     = new WebAssembly.Global({ value: "i64", mutable: true }, stack_low);
-	
+	// TODO: Changing the heap pointers does not work, I think, because these are baked in the binary
+	//{
+	const __heap_base     = new WebAssembly.Global({ value: "i64", mutable: true }, heap_base);
+	const __heap_end      = new WebAssembly.Global({ value: "i64", mutable: true }, heap_end);
+	//}
+
 	const memory = imports["env"]["memory"];
 	const atomicInstance = new WebAssembly.Instance(atomicModule, imports);
 	const mainInstance = new WebAssembly.Instance(mainModule,
@@ -353,7 +364,7 @@ onmessage = async function(message)
 				wasm_wait:   atomicInstance.exports.wait,
 				wasm_lock:   atomicInstance.exports.lock,
 				wasm_unlock: atomicInstance.exports.unlock,
-				__stack_pointer, __stack_high, __stack_low
+				__stack_pointer, __stack_high, __stack_low, __heap_base, __heap_end
 			}
 		}
 	);
@@ -570,7 +581,7 @@ build_main ::
 				for JsSource.[
 					.{
 						tprint("%main.js", js_output_path),
-						tprint(MAIN_JS_FILE_CONTENT, nr_pages, WASM_MEMORY_STACK_SIZE)
+						tprint(MAIN_JS_FILE_CONTENT, nr_pages, WASM_MEMORY_STACK_SIZE, memory_size)
 					},
 					.{
 						tprint("%worker.js", js_output_path),

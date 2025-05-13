@@ -5,33 +5,35 @@ COUNTER := 5;
 
 main_proc :: (worker: *Worker)
 {
-	if COUNTER == 3
+	if COUNTER == 2
 	{
 		group := context.worker_group;
-		wasm_wake(group.workers[1].semaphore);
-		wasm_wake(group.workers[1].semaphore);
-		// wasm_wake(group.workers[2].semaphore);
+		wake(*group.workers[1]);
+		wake(*group.workers[1]);
+		wake(*group.workers[2]);
 	}
 	 
 	COUNTER -= 1;
-	// pre_message := "Main: sleeping\n";
-	// wasm_write_string(pre_message.count, pre_message.data, false);
-	sleep(worker, 1000);
-	if COUNTER == 0 { terminate_workers(); }
+	sleep(worker, 2000);
+
+	if COUNTER == 0 { terminate_workers(worker); }
 }
 
 worker_proc :: (worker: *Worker)
 {
-	post_message := "Worker: working\n";
-	wasm_write_string(post_message.count, post_message.data, false);
-		
+	// print("Worker(%): working\n", worker.index);
+	
+	write_worker_log(worker.index, "working");
+
 	sleep(worker, 1000);
 }
 
 /*
   (global $__stack_pointer (;0;) (import "env" "__stack_pointer") (mut i64))
-  (global $__stack_high (;0;) (import "env" "__stack_high") (mut i64))
-  (global $__stack_low (;0;) (import "env" "__stack_low") (mut i64))
+  (global $__stack_high    (;0;) (import "env" "__stack_high")    (mut i64))
+  (global $__stack_low     (;0;) (import "env" "__stack_low")     (mut i64))
+  (global $__heap_base     (;0;) (import "env" "__heap_base")     (mut i64))
+  (global $__heap_end      (;0;) (import "env" "__heap_end")      (mut i64))
 
   (global $__stack_pointer (mut i64) (i64.const 1107248))
   

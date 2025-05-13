@@ -1,9 +1,39 @@
+#import "Basic";
 
 MS2NS :: 1000000;
 
 sleep :: (worker: *Worker, ms: s64)
 {
-	wasm_sleep(worker.sentinel, ms*MS2NS);
+	sentinel := 0;
+	wasm_sleep(*sentinel, ms*MS2NS);
+}
+
+wake :: (worker: *Worker)
+{
+ 	assert(worker.semaphore.* >= 0);
+
+	wasm_wake(worker.semaphore);
+}
+
+wait :: (worker: *Worker)
+{
+ 	assert(worker.semaphore.* >= 0);
+
+	wasm_wait(worker.semaphore);
+}
+
+lock :: (worker: *Worker)
+{
+	assert(worker.mutex.* >= 0);
+
+	wasm_lock(worker.mutex);
+}
+
+unlock :: (worker: *Worker)
+{
+	assert(worker.mutex.* >= 0);
+
+	wasm_unlock(worker.mutex);
 }
 
 Array :: struct ($T: Type, $S: int)
@@ -42,28 +72,6 @@ else
     
         #insert body;
     }
-}
-
-allocate :: (size: s64) -> *void
-{
-    result := context.allocator.proc(.ALLOCATE, size, 0, null, context.allocator.data);
-
-    return result;
-}
-
-NEW :: ($T: Type, initialized := true) -> *T #expand
-{
-    memory := allocate(size_of(T));
-
-#if initialized 
-{
-    ini :: initializer_of(T);
-
-    #if ini  inline ini(memory);
-    else     memset(memory, 0, size_of(T));
-}
-
-    return cast(*T) memory;
 }
 
 insert :: inline (array: *$A/Array, index: s64) -> *array.T

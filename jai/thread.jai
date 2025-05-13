@@ -5,8 +5,6 @@ Worker :: struct
 	index:       s64;
 	mutex:      *s64;
 	semaphore:  *s64;
-	
-	sentinel:   *s64;
 }
 
 WorkerGroup :: struct
@@ -16,20 +14,16 @@ WorkerGroup :: struct
 	should_exit: bool;
 }
 
-terminate_workers :: ()
+terminate_workers :: (worker: *Worker)
 {
 	group := context.worker_group;
+
+	write_worker_log(worker.index, "waking workers for termination");
 
 	group.should_exit = true;
 	for *worker: group.workers
 	{
-		if worker.index != 0
-		{
-			post_message := "Main: waking thread\n";
-			wasm_write_string(post_message.count, post_message.data, false);
-			
-			wasm_wake(worker.semaphore);
-		}
+		wake(worker);
 	}
 }
 
@@ -39,47 +33,51 @@ terminate_workers :: ()
 worker_main :: (index: s64) #c_call
 {
 	new_context: #Context;
-	push_context new_context
-	{		
-		mutex := 0;
-		semaphore := 1;
-		sentinel  := 0;
 
-		insert(*WORKER_GROUP.workers, index, .{index, *mutex, *semaphore, *sentinel});
+	push_context new_context
+	{
+		mutex    := 0;
+		sentinel := 0;
+		insert(*WORKER_GROUP.workers, index, .{index, *mutex, *sentinel});
+
+		// insert(*WORKER_GROUP.workers, index, .{index, New(s64), New(s64)});
 		
 		worker := *WORKER_GROUP.workers[index];
+		worker.semaphore.* = 1;
+		write_worker_log(worker.index, "starting");
+
+		// print("Worker: %\n", worker.*);
 		// TODO: Probably have a fence here?
 		if index == 0
 		{
-			pre_message := "Main: pre wasm\n";
-			wasm_write_string(pre_message.count, pre_message.data, false);
-			
+			// print("Main(%): starting\n", index);
+									
 			while !WORKER_GROUP.should_exit
 			{
 				main_proc(worker,, worker_group=*WORKER_GROUP);
-			}
-			
-			post_message := "Main: post wasm\n";
-			wasm_write_string(post_message.count, post_message.data, false);
+			}			
+			// print("Main(%): exiting\n", index);
 		}
 		else
 		{
-			pre_message := "Worker: pre wasm\n";
-			wasm_write_string(pre_message.count, pre_message.data, false);
-
+			// print("Worker(%): starting\n", index);
+			
 			while !WORKER_GROUP.should_exit
 			{	
-				wasm_wait(worker.semaphore);
+				wait(worker);
 				if WORKER_GROUP.should_exit { break; }
 				
-				wasm_lock(worker.mutex);
+				// TODO: look only while pulling the work data
+				lock(worker);
+				defer unlock(worker);
+				
 				worker_proc(worker);
-				wasm_unlock(worker.mutex);
 			}
 			
-			post_message := "Worker: post wasm\n";
-			wasm_write_string(post_message.count, post_message.data, false);
+			// print("Worker(%): exiting\n", index);
 		}
+		
+		write_worker_log(worker.index, "terminating");
 	}
 }
 

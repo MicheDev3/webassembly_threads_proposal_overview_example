@@ -26,18 +26,14 @@ __element_duplicate :: (start: *u8, num_elements: s64, size: s64) #c_call #no_ao
 	}
 }
 
-write_nonnegative_number :: (n: u64, base := 10, to_standard_error := false) #no_context #no_abc #no_aoc
+write_number :: (number: u64, base := 10, negative := false) -> string #must #no_context #no_abc #no_aoc
 {
-	if n == 0
-	{
-		write_string("0", to_standard_error);
-		return;
-	}
+	if number == 0 { return "0"; }
 	
 	if base > 16  base = 16;
 	if base < 2   base = 2;
 	
-	ubase := cast,no_check(u64) base;
+	ubase := cast,no_check(u64)base;
 	
 	// This is of course a horrible hack.
 	// A u64 in base 2 can be up to 64 digits,
@@ -47,52 +43,50 @@ write_nonnegative_number :: (n: u64, base := 10, to_standard_error := false) #no
 	starting_cursor : s32 = buf.count;
 	cursor := starting_cursor;
 	
-	
-	while n
+	while number
 	{
 		cursor -= 1;
-		index := n % ubase;
-		if index <= 9
-		{
-			buf[cursor] = cast(u8)(index + #char "0");
-		}
-		else
-		{
-			buf[cursor] = cast(u8)(index - 10 + #char "a");
-		}
-		
-		n /= ubase;
+		index := number % ubase;
+		if index <= 9 { buf[cursor] = cast(u8)(index      + #char "0"); }
+		else          { buf[cursor] = cast(u8)(index - 10 + #char "a"); }
+		number /= ubase;
 	}
 	
-	s: string = ---;
-	s.data  = buf.data + cursor;
-	s.count = starting_cursor - cursor;
-	write_string(s, to_standard_error);
+	if negative
+	{
+		cursor -= 1;
+		buf[cursor] = #char "-";
+	}
+	
+	result: string = ---;
+	result.data  = buf.data + cursor;
+	result.count = starting_cursor - cursor;
+	
+	return result;
 }
 
-write_number :: (n: s64, base := 10, to_standard_error := false) #no_context #no_aoc
+write_number :: (number: s64, base := 10) -> string #must #no_context
 {
-	if n < 0 
-	{
-		write_string("-", to_standard_error);
-		n = -n;  // Will overflow if this is the most negative s64.
-	}
+	result := write_number(cast,no_check(u64)number, base, number < 0);
 	
-	write_nonnegative_number(cast,no_check(u64) n, base, to_standard_error = to_standard_error);
+	return result;
 }
 
 runtime_support_assertion_failed :: (loc: Source_Code_Location, message: string) -> bool
 {
+	wasm_lock(*write_string_lock);
+	defer wasm_unlock(*write_string_lock);
+	
 	write_loc(loc, to_standard_error = true);
-	write_string(": Assertion failed", to_standard_error = true);
+	write_string_unsynchronized(": Assertion failed", to_standard_error = true);
 	
 	if message
 	{
-		write_strings(": ", message, "\n", to_standard_error = true);
+		write_strings_unsynchronized(": ", message, "\n", to_standard_error = true);
 	}
 	else
 	{
-		write_string("!\n", to_standard_error = true);
+		write_string_unsynchronized("!\n", to_standard_error = true);
 	}
 	
 	print_stack_trace :: (node: *Stack_Trace_Node)
@@ -107,13 +101,13 @@ runtime_support_assertion_failed :: (loc: Source_Code_Location, message: string)
 			
 			if node.info
 			{
-				write_string(node.info.location.fully_pathed_filename, to_standard_error = true);
-				write_string(":", to_standard_error = true);
-				write_nonnegative_number(node.line_number, to_standard_error = true);
-				write_string(": ", to_standard_error = true);
-				if node.info.name write_string(node.info.name, to_standard_error = true);
-				else write_string("(anonymous procedure)", to_standard_error = true);
-				write_string("\n", to_standard_error = true);
+				write_string_unsynchronized(node.info.location.fully_pathed_filename, to_standard_error = true);
+				write_string_unsynchronized(":", to_standard_error = true);
+				write_string_unsynchronized(write_number(cast(u64)node.line_number), to_standard_error = true);
+				write_string_unsynchronized(": ", to_standard_error = true);
+				if node.info.name write_string_unsynchronized(node.info.name, to_standard_error = true);
+				else write_string_unsynchronized("(anonymous procedure)", to_standard_error = true);
+				write_string_unsynchronized("\n", to_standard_error = true);
 			}
 			
 			node = node.next;
@@ -122,12 +116,12 @@ runtime_support_assertion_failed :: (loc: Source_Code_Location, message: string)
 	
 	if context.stack_trace
 	{
-		write_string("\nStack trace:\n", to_standard_error = true);
+		write_string_unsynchronized("\nStack trace:\n", to_standard_error = true);
 		print_stack_trace(context.stack_trace);
 	}
 	else
 	{
-		write_string("Exiting.\n", to_standard_error = true);
+		write_string_unsynchronized("Exiting.\n", to_standard_error = true);
 	}
 	
 	__runtime_support_disable_stack_trace = true;
@@ -138,16 +132,19 @@ runtime_support_assertion_failed :: (loc: Source_Code_Location, message: string)
 runtime_support_default_logger :: (message: string, data: *void, info: Log_Info)
 {
 	if !message then return;
+
+	wasm_lock(*write_string_lock);
+	defer wasm_unlock(*write_string_lock);
 	
 	to_standard_error := (info.common_flags & .ERROR) != 0;
 	
 	if message[message.count-1] != #char "\n"
 	{
-		write_strings(message, "\n", to_standard_error = to_standard_error);
+		write_strings_unsynchronized(message, "\n", to_standard_error = to_standard_error);
 	}
 	else
 	{
-		write_string(message, to_standard_error = to_standard_error);
+		write_string_unsynchronized(message, to_standard_error = to_standard_error);
 	}
 }
 
@@ -172,36 +169,42 @@ to_string :: (c_string: *u8) -> string #no_context
 // @Incomplete: Pass loc to Runtime_Support versions.
 __array_bounds_check_fail :: (index: s64, limit: s64, line_number: s64, filename: *u8) #no_context
 {
+	wasm_lock(*write_string_lock);
+	defer wasm_unlock(*write_string_lock);
+	
 	// @Volatile: It is a good idea for these to match the error reports in constant-expression evaluation inside the compiler.
-	write_string("Array bounds check failed. (The attempted index is ", to_standard_error = true);
-	write_number(index, to_standard_error = true);
+	write_string_unsynchronized("Array bounds check failed. (The attempted index is ", to_standard_error = true);
+	write_string_unsynchronized(write_number(index), to_standard_error = true);
 	
 	if limit > 0
 	{
-		write_string(", but the highest valid index is ", to_standard_error = true);
-		write_number(limit-1, to_standard_error = true);
+		write_string_unsynchronized(", but the highest valid index is ", to_standard_error = true);
+		write_string_unsynchronized(write_number(limit-1), to_standard_error = true);
 	}
 	else if limit == 0
 	{
-		write_string(", but the array has dimension 0, so no index is valid", to_standard_error = true);
+		write_string_unsynchronized(", but the array has dimension 0, so no index is valid", to_standard_error = true);
 	}
 	else
 	{
-		write_string(", but the array has invalid negative dimension ", to_standard_error = true);
-		write_number(limit, to_standard_error = true);
+		write_string_unsynchronized(", but the array has invalid negative dimension ", to_standard_error = true);
+		write_string_unsynchronized(write_number(limit), to_standard_error = true);
 	}
 	
-	write_string("). Site is ", to_standard_error = true);
-	write_string(to_string(filename), to_standard_error = true);
-	write_string(":", to_standard_error = true);
-	write_number(line_number, to_standard_error = true);
-	write_string(".\n", to_standard_error = true);
+	write_string_unsynchronized("). Site is ", to_standard_error = true);
+	write_string_unsynchronized(to_string(filename), to_standard_error = true);
+	write_string_unsynchronized(":", to_standard_error = true);
+	write_string_unsynchronized(write_number(line_number), to_standard_error = true);
+	write_string_unsynchronized(".\n", to_standard_error = true);
 	
 	my_panic();
 }
 
 __cast_bounds_check_fail :: (pre_value: s64, pre_flags: u32, post_value: s64, post_flags: u32, fatal: u8, line_number: s64, filename: *u8) #no_context
 {
+	wasm_lock(*write_string_lock);
+	defer wasm_unlock(*write_string_lock);
+	
 	bits : s32 = 0;
 	
 	NUMBER_FLAG_SIGNED   :: 0x40;
@@ -215,15 +218,15 @@ __cast_bounds_check_fail :: (pre_value: s64, pre_flags: u32, post_value: s64, po
 	if post_flags & NUMBER_FLAG_16BIT bits = 16;
 	if post_flags & NUMBER_FLAG_8BIT  bits = 8;
 	
-	write_string("Cast bounds check failed.  Number must be in [", to_standard_error = true);
+	write_string_unsynchronized("Cast bounds check failed.  Number must be in [", to_standard_error = true);
 	
 	if post_flags & NUMBER_FLAG_SIGNED
 	{
 		high_value := (1 << (bits - 1)) - 1;
 		low_value  := ~high_value;
-		write_number(low_value, to_standard_error = true);
-		write_string(", ", to_standard_error = true);
-		write_number(high_value, to_standard_error = true);
+		write_string_unsynchronized(write_number(low_value), to_standard_error = true);
+		write_string_unsynchronized(", ", to_standard_error = true);
+		write_string_unsynchronized(write_number(high_value), to_standard_error = true);
 	}
 	else
 	{
@@ -239,54 +242,61 @@ __cast_bounds_check_fail :: (pre_value: s64, pre_flags: u32, post_value: s64, po
 			high_value = ((cast(u64)1) << bits) - 1;
 		}
 		
-		write_string("0, ", to_standard_error = true);
-		write_nonnegative_number(high_value, to_standard_error = true);
+		write_string_unsynchronized("0, ", to_standard_error = true);
+		write_string_unsynchronized(write_number(high_value), to_standard_error = true);
 	}
 	
-	write_string("]; it was ", to_standard_error = true);
+	write_string_unsynchronized("]; it was ", to_standard_error = true);
 	
 	if pre_flags & NUMBER_FLAG_SIGNED
 	{
-		write_number(pre_value, to_standard_error = true);
+		write_string_unsynchronized(write_number(pre_value), to_standard_error = true);
 	}
 	else
 	{
-		write_nonnegative_number(cast,no_check(u64) pre_value, to_standard_error = true);
+		write_string_unsynchronized(write_number(cast,no_check(u64) pre_value), to_standard_error = true);
 	}
 	
-	write_string(".  Site is ", to_standard_error = true);
+	write_string_unsynchronized(".  Site is ", to_standard_error = true);
 	
-	write_string(to_string(filename), to_standard_error = true);
-	write_string(":", to_standard_error = true);
-	write_number(line_number, to_standard_error = true);
-	write_string(".\n", to_standard_error = true);
+	write_string_unsynchronized(to_string(filename), to_standard_error = true);
+	write_string_unsynchronized(":", to_standard_error = true);
+	write_string_unsynchronized(write_number(line_number), to_standard_error = true);
+	write_string_unsynchronized(".\n", to_standard_error = true);
 	
 	if fatal my_panic();
 }
 
 __null_pointer_check_fail :: (index: s64, line_number: s64, filename: *u8) #no_context
 {
+	wasm_lock(*write_string_lock);
+	defer wasm_unlock(*write_string_lock);
+
 	// @Volatile: It is a good idea for these to match the error reports in constant-expression evaluation inside the compiler.
-	if index {
+	if index 
+	{
 		// This is a procedure argument.
-		write_string("Null pointer check failed: Argument ", to_standard_error = true);
-		write_number(index, to_standard_error = true);
-		write_string(" is undergoing an automatic dereference, but the pointer is null. Site is ", to_standard_error = true);
+		write_string_unsynchronized("Null pointer check failed: Argument ", to_standard_error = true);
+		write_string_unsynchronized(write_number(index), to_standard_error = true);
+		write_string_unsynchronized(" is undergoing an automatic dereference, but the pointer is null. Site is ", to_standard_error = true);
 	} else {
 		// It was a dereference that happened in some other way.
-		write_string("Null pointer check failed: A pointer is undergoing an automatic dereference, but the pointer is null. Site is ", to_standard_error = true);
+		write_string_unsynchronized("Null pointer check failed: A pointer is undergoing an automatic dereference, but the pointer is null. Site is ", to_standard_error = true);
 	}
 	
-	write_string(to_string(filename), to_standard_error = true);
-	write_string(":", to_standard_error = true);
-	write_number(line_number, to_standard_error = true);
-	write_string(".\n", to_standard_error = true);
+	write_string_unsynchronized(to_string(filename), to_standard_error = true);
+	write_string_unsynchronized(":", to_standard_error = true);
+	write_string_unsynchronized(write_number(line_number), to_standard_error = true);
+	write_string_unsynchronized(".\n", to_standard_error = true);
 	
 	my_panic();
 }
 
 __arithmetic_overflow :: (left: s64, right: s64, type_code: u16, line_number: s64, filename: *u8) #no_context #no_aoc
 {
+	wasm_lock(*write_string_lock);
+	defer wasm_unlock(*write_string_lock);
+
 	// We have some free bits in type_code...!
 	fatal  := (type_code & 0x8000);
 	signed := (type_code & 0x4000);
@@ -300,19 +310,15 @@ __arithmetic_overflow :: (left: s64, right: s64, type_code: u16, line_number: s6
 	else if operator_index == 2 then operator_string = " - ";
 	else if operator_index == 3 then operator_string = " * ";
 	
-	write_string("Arithmetic overflow. We tried to compute:\n    ", to_standard_error = true);
+	write_string_unsynchronized("Arithmetic overflow. We tried to compute:\n    ", to_standard_error = true);
 	
-	if signed  write_number(left, to_standard_error = true);
-	else       write_nonnegative_number(cast,no_check(u64)left, to_standard_error = true);
+	write_string_unsynchronized(write_number(left), to_standard_error = true);
+	write_string_unsynchronized(operator_string, to_standard_error = true);
+	write_string_unsynchronized(write_number(right), to_standard_error = true);
 	
-	write_string(operator_string, to_standard_error = true);
-	
-	if signed  write_number(right, to_standard_error = true);
-	else       write_nonnegative_number(cast,no_check(u64)right, to_standard_error = true);
-	
-	write_strings("\nThe operand type is ", signed_string, to_standard_error = true);
-	write_nonnegative_number(size, to_standard_error = true);
-	write_string(", but the result does not fit into this type.\n", to_standard_error = true);
+	write_strings_unsynchronized("\nThe operand type is ", signed_string, to_standard_error = true);
+	write_string_unsynchronized(write_number(size), to_standard_error = true);
+	write_string_unsynchronized(", but the result does not fit into this type.\n", to_standard_error = true);
 	
 	if fatal my_panic();
 }
@@ -322,51 +328,53 @@ write_string_unsynchronized :: (s: string, to_standard_error := false) #no_conte
 	wasm_write_string(s.count, s.data, to_standard_error);
 }
 
-write_string :: (s: string, to_standard_error := false) #no_context #compiler
+write_strings_unsynchronized :: (strings: ..string, to_standard_error := false) #no_context
 {
-	// write_string is marked #compiler because, if called at compile-time, it
-	// involves a different implementation that also syncs with the compiler's output.
-	// This runtime version of write_string is just about syncing the threads
-	// in your own program.
-	wasm_lock(*write_string_lock);
-	write_string_unsynchronized(s, to_standard_error);
-	wasm_unlock(*write_string_lock);
+	for strings write_string_unsynchronized(it, to_standard_error);
 }
 
-write_strings :: (strings: ..string, to_standard_error := false) #no_context #compiler
+write_worker_log :: (worker_index: s64, message: string)
 {
-	// write_strings is marked #compiler because, if called at compile-time, it
-	// involves a different implementation that also syncs with the compiler's output.
-	// This runtime version of write_strings is just about syncing the threads
-	// in your own program.
 	wasm_lock(*write_string_lock);
-	for strings write_string_unsynchronized(it, to_standard_error);
-	wasm_unlock(*write_string_lock);
+	defer wasm_unlock(*write_string_lock);
+	
+	write_string_unsynchronized("Worker");
+	write_string_unsynchronized("(");
+	write_string_unsynchronized(write_number(worker_index));
+	write_string_unsynchronized("): ");
+	write_string_unsynchronized(message);
+	write_string_unsynchronized("\n");
 }
+
+write_string  :: (s: string, to_standard_error := false)         #no_context #compiler;
+write_strings :: (strings: ..string, to_standard_error := false) #no_context #compiler;
 
 #scope_module;
 
 write_loc :: (loc: Source_Code_Location, to_standard_error := false) #no_context
 {
-	write_strings(loc.fully_pathed_filename, ":", to_standard_error = to_standard_error);
-	write_number(loc.line_number, to_standard_error = to_standard_error);
-	write_string(",", to_standard_error);
-	write_number(loc.character_number, to_standard_error = to_standard_error);
+	write_strings_unsynchronized(loc.fully_pathed_filename, ":", to_standard_error = to_standard_error);
+	write_string_unsynchronized(write_number(loc.line_number), to_standard_error);
+	write_string_unsynchronized(",", to_standard_error);
+	write_string_unsynchronized(write_number(loc.character_number), to_standard_error);
 }
 
 my_panic :: () #no_context
 {
-	write_string("Panic.\n", to_standard_error = true);
+	write_string_unsynchronized("Panic.\n", to_standard_error = true);
 	debug_break();
 }
 
 __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, filename: *u8) #no_context
 {
-	write_string("Error: Attempt to call a compile-time procedure at runtime. The location of the call was: ", to_standard_error = true);
-	write_string(to_string(filename), to_standard_error = true);
-	write_string(":", to_standard_error = true);
-	write_number(line_number, to_standard_error = true);
-	write_string(".\n", to_standard_error = true);
+	wasm_lock(*write_string_lock);
+	defer wasm_unlock(*write_string_lock);
+
+	write_string_unsynchronized("Error: Attempt to call a compile-time procedure at runtime. The location of the call was: ", to_standard_error = true);
+	write_string_unsynchronized(to_string(filename), to_standard_error = true);
+	write_string_unsynchronized(":", to_standard_error = true);
+	write_string_unsynchronized(write_number(line_number), to_standard_error = true);
+	write_string_unsynchronized(".\n", to_standard_error = true);
 	
 	my_panic();
 }
@@ -516,7 +524,4 @@ set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
 
 #scope_module
 
-// TODO: Should I implement these?
 write_string_lock: s64;
-runtime_support_acquire :: (lock: *$T) #no_context #expand {}
-runtime_support_release :: (lock: *$T) #no_context #expand {}
