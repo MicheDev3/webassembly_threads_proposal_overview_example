@@ -128,7 +128,10 @@ WAT_ATOMIC_FILE_CONTENT :: #string DONE
 			        	(call $wait 
 			        		(local.get $address)
 			        		(i64.const  0)
-			        		(i64.const -1)
+			        		;; TODO: for some reason when multiple threads lock a mutex
+			        		;; they aren't all unlock so for now just setting a 5 seconds
+			        		;;  wait. Understand why this is happening
+			        		(i64.const 5000000)
 			        	)
 		        	)
 					
@@ -190,8 +193,9 @@ async function main()
 			);
 			
 			const workers  = [];
-			// const workerCount = window.navigator.hardwareConcurrency;
-			const workerCount = 8;
+			var workerCount = window.navigator.hardwareConcurrency;
+			if (workerCount > %4) { workerCount = %4; }
+
 			var heap_end  = BigInt(%3);
 			for (let i = 0; i < workerCount; i++)
 			{
@@ -369,7 +373,9 @@ onmessage = async function(message)
 		}
 	);
 
+	// console.log("JS: worker(%d) started", worker_index);
 	mainInstance.exports.worker_main(BigInt(worker_index));
+	// console.log("JS: worker(%d) terminated", worker_index);
 }
 
 DONE;
@@ -457,7 +463,8 @@ build_main ::
 	wat_output_path: string,
 	wasm_output_path: string,
 	js_output_path: string,
-	nr_pages: int
+	nr_pages: int,
+	max_number_of_workers: int
 )
 {
 	w := compiler_create_workspace("Main");
@@ -581,7 +588,7 @@ build_main ::
 				for JsSource.[
 					.{
 						tprint("%main.js", js_output_path),
-						tprint(MAIN_JS_FILE_CONTENT, nr_pages, WASM_MEMORY_STACK_SIZE, memory_size)
+						tprint(MAIN_JS_FILE_CONTENT, nr_pages, WASM_MEMORY_STACK_SIZE, memory_size, max_number_of_workers)
 					},
 					.{
 						tprint("%worker.js", js_output_path),
@@ -625,18 +632,28 @@ build_main ::
 	}
 	
 	nr_pages := 1000;
+	max_number_of_workers := 32;
 	wasm_compiler_path := "wat2wasm";
 	args := parent_options.compile_time_command_line;
 	for args
 	{
 		if it_index ==
 		{
-			case 0; { wasm_compiler_path = it;   }
-			case 1; { nr_pages = to_integer(it); }
+			case 0; { wasm_compiler_path    = it;             }
+			case 1; { nr_pages              = to_integer(it); }
+			case 2; { max_number_of_workers = to_integer(it); }
 		}
 	}
 	
-	build_main(parent_options, wasm_compiler_path, wat_output_path, wasm_output_path, js_output_path, nr_pages);
+	build_main(
+		parent_options,
+		wasm_compiler_path,
+		wat_output_path,
+		wasm_output_path,
+		js_output_path,
+		nr_pages,
+		max_number_of_workers
+	);
 	
 	set_build_options_dc(.{do_output = false}, w);
 }

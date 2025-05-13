@@ -74,8 +74,8 @@ write_number :: (number: s64, base := 10) -> string #must #no_context
 
 runtime_support_assertion_failed :: (loc: Source_Code_Location, message: string) -> bool
 {
-	wasm_lock(*write_string_lock);
-	defer wasm_unlock(*write_string_lock);
+	wasm_lock(*CONSOLE_LOCK);
+	defer wasm_unlock(*CONSOLE_LOCK);
 	
 	write_loc(loc, to_standard_error = true);
 	write_string_unsynchronized(": Assertion failed", to_standard_error = true);
@@ -133,8 +133,8 @@ runtime_support_default_logger :: (message: string, data: *void, info: Log_Info)
 {
 	if !message then return;
 
-	wasm_lock(*write_string_lock);
-	defer wasm_unlock(*write_string_lock);
+	wasm_lock(*CONSOLE_LOCK);
+	defer wasm_unlock(*CONSOLE_LOCK);
 	
 	to_standard_error := (info.common_flags & .ERROR) != 0;
 	
@@ -169,8 +169,8 @@ to_string :: (c_string: *u8) -> string #no_context
 // @Incomplete: Pass loc to Runtime_Support versions.
 __array_bounds_check_fail :: (index: s64, limit: s64, line_number: s64, filename: *u8) #no_context
 {
-	wasm_lock(*write_string_lock);
-	defer wasm_unlock(*write_string_lock);
+	wasm_lock(*CONSOLE_LOCK);
+	defer wasm_unlock(*CONSOLE_LOCK);
 	
 	// @Volatile: It is a good idea for these to match the error reports in constant-expression evaluation inside the compiler.
 	write_string_unsynchronized("Array bounds check failed. (The attempted index is ", to_standard_error = true);
@@ -202,8 +202,8 @@ __array_bounds_check_fail :: (index: s64, limit: s64, line_number: s64, filename
 
 __cast_bounds_check_fail :: (pre_value: s64, pre_flags: u32, post_value: s64, post_flags: u32, fatal: u8, line_number: s64, filename: *u8) #no_context
 {
-	wasm_lock(*write_string_lock);
-	defer wasm_unlock(*write_string_lock);
+	wasm_lock(*CONSOLE_LOCK);
+	defer wasm_unlock(*CONSOLE_LOCK);
 	
 	bits : s32 = 0;
 	
@@ -269,8 +269,8 @@ __cast_bounds_check_fail :: (pre_value: s64, pre_flags: u32, post_value: s64, po
 
 __null_pointer_check_fail :: (index: s64, line_number: s64, filename: *u8) #no_context
 {
-	wasm_lock(*write_string_lock);
-	defer wasm_unlock(*write_string_lock);
+	wasm_lock(*CONSOLE_LOCK);
+	defer wasm_unlock(*CONSOLE_LOCK);
 
 	// @Volatile: It is a good idea for these to match the error reports in constant-expression evaluation inside the compiler.
 	if index 
@@ -294,8 +294,8 @@ __null_pointer_check_fail :: (index: s64, line_number: s64, filename: *u8) #no_c
 
 __arithmetic_overflow :: (left: s64, right: s64, type_code: u16, line_number: s64, filename: *u8) #no_context #no_aoc
 {
-	wasm_lock(*write_string_lock);
-	defer wasm_unlock(*write_string_lock);
+	wasm_lock(*CONSOLE_LOCK);
+	defer wasm_unlock(*CONSOLE_LOCK);
 
 	// We have some free bits in type_code...!
 	fatal  := (type_code & 0x8000);
@@ -335,15 +335,13 @@ write_strings_unsynchronized :: (strings: ..string, to_standard_error := false) 
 
 write_worker_log :: (worker_index: s64, message: string)
 {
-	wasm_lock(*write_string_lock);
-	defer wasm_unlock(*write_string_lock);
-	
-	write_string_unsynchronized("Worker");
-	write_string_unsynchronized("(");
-	write_string_unsynchronized(write_number(worker_index));
-	write_string_unsynchronized("): ");
-	write_string_unsynchronized(message);
-	write_string_unsynchronized("\n");
+	wasm_lock(*CONSOLE_LOCK);
+	defer wasm_unlock(*CONSOLE_LOCK);
+
+	for string.["WASM: worker(", write_number(worker_index), ") ", message, "\n"]
+	{
+		write_strings_unsynchronized(it);
+	}
 }
 
 write_string  :: (s: string, to_standard_error := false)         #no_context #compiler;
@@ -367,8 +365,8 @@ my_panic :: () #no_context
 
 __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, filename: *u8) #no_context
 {
-	wasm_lock(*write_string_lock);
-	defer wasm_unlock(*write_string_lock);
+	wasm_lock(*CONSOLE_LOCK);
+	defer wasm_unlock(*CONSOLE_LOCK);
 
 	write_string_unsynchronized("Error: Attempt to call a compile-time procedure at runtime. The location of the call was: ", to_standard_error = true);
 	write_string_unsynchronized(to_string(filename), to_standard_error = true);
@@ -524,4 +522,4 @@ set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
 
 #scope_module
 
-write_string_lock: s64;
+CONSOLE_LOCK: s64;

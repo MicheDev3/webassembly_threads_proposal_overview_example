@@ -7,8 +7,9 @@ Parameters (they must be defined in this order):
 
 	- wasm-compiler-path: compiler to generate wasm files for wat. Default: "wat2wasm"
 	- memory-pages: how many pages the memory will have. Default: 100
+	- max-number-of-workers: maximum number of workers. Default: 32
 
-e.g: `jai jai/build.jai - path\to\wat2wasm 20` 
+e.g: `jai jai/build.jai - path\to\wat2wasm 20 64` 
 
 # How to Run
 
