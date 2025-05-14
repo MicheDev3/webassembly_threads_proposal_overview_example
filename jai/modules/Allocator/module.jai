@@ -1,20 +1,12 @@
 #scope_file
 
-CAPS_VERSION_STRING :: "Allocator";
-
-min :: (a: $T, b: T) -> T 
-{
-    if a < b return a;
-    return b;
-}
-
 _MAIN :ArenaType = .Main;
 _TEMP :ArenaType = .Temp;
 
 ArenaType :: enum
 {
-    Main;
-    Temp;
+	Main;
+	Temp;
 }
 
 MemoryBlock :: struct
@@ -37,18 +29,18 @@ TEMP :: *_TEMP;
 
 MemoryArena :: struct
 {
-    base: *u8;
+	base: *u8;
 	size: s64;
-    used: s64;
+	used: s64;
 }
 
 ArenaAllocator :: struct
 {
-    main: MemoryArena;
-    temp: MemoryArena;
+	main: MemoryArena;
+	temp: MemoryArena;
 }
 
-allocator_proc :: 
+allocator_proc ::
 (
 	mode: Allocator_Mode,
 	requested_size: s64,
@@ -58,76 +50,76 @@ allocator_proc ::
 ) -> *void
 {
 	allocator: *ArenaAllocator = allocator_data;
-
-    if #complete mode == 
-    {
+	
+	if #complete mode ==
+	{
 		case .ALLOCATE;
-        {
+		{
 			arena: *MemoryArena;
-            if context.allocator_type ==
-            {
-                case TEMP; { arena = *allocator.temp; }
-                case MAIN; { arena = *allocator.main; }
-            }
-            
-            // TODO: Support alignment
-            
-            result := arena.base + arena.used;
-            arena.used += requested_size;
-            
-            return result;
+			if context.allocator_type ==
+			{
+				case TEMP; { arena = *allocator.temp; }
+				case MAIN; { arena = *allocator.main; }
+			}
+			
+			// TODO: Support alignment
+			
+			result := arena.base + arena.used;
+			arena.used += requested_size;
+			
+			return result;
 		}
-        case .FREE;
-        {
+		case .FREE;
+		{
 			arena: *MemoryArena;
-            if context.allocator_type ==
-            {
-                case TEMP; { arena = *allocator.temp; }
-                case MAIN; { arena = *allocator.main; }
-            }
-            
-            arena.used = 0;
-            
-            return null;
+			if context.allocator_type ==
+			{
+				case TEMP; { arena = *allocator.temp; }
+				case MAIN; { arena = *allocator.main; }
+			}
+			
+			arena.used = 0;
+			
+			return null;
 		}
-        case .RESIZE;
-        {
+		case .RESIZE;
+		{
 			context.handling_assertion_failure = true;
-            context.assertion_failed(#location(), "Resizing is not supported.\n");
-            context.handling_assertion_failure = false;
-        	return null;
-        }
-        case .STARTUP;
-        {
-			context.handling_assertion_failure = true;
-            context.assertion_failed(#location(), "Startup are not supported.\n");
-            context.handling_assertion_failure = false;
-            return null;
-        }
-        case .SHUTDOWN;
-        {
-			context.handling_assertion_failure = true;
-            context.assertion_failed(#location(), "Shutdown are not supported.\n");
-            context.handling_assertion_failure = false;
-            return null;
-        }
-        case .THREAD_START; #through;
-        case .THREAD_STOP;
-        {
-			context.handling_assertion_failure = true;
-            context.assertion_failed(#location(), "Threading are not supported.\n");
-            context.handling_assertion_failure = false;
-            return null;
+			context.assertion_failed(#location(), "Resizing is not supported.\n");
+			context.handling_assertion_failure = false;
+			return null;
 		}
-        case .CREATE_HEAP; #through;
-        case .DESTROY_HEAP;
-        {
-            context.handling_assertion_failure = true;
-            context.assertion_failed(#location(), "Heaps are not supported.\n");
-            context.handling_assertion_failure = false;
-            return null;
-        }
-        case .IS_THIS_YOURS;
+		case .STARTUP;
+		{
+			context.handling_assertion_failure = true;
+			context.assertion_failed(#location(), "Startup are not supported.\n");
+			context.handling_assertion_failure = false;
+			return null;
+		}
+		case .SHUTDOWN;
+		{
+			context.handling_assertion_failure = true;
+			context.assertion_failed(#location(), "Shutdown are not supported.\n");
+			context.handling_assertion_failure = false;
+			return null;
+		}
+		case .THREAD_START; #through;
+		case .THREAD_STOP;
+		{
+			context.handling_assertion_failure = true;
+			context.assertion_failed(#location(), "Threading are not supported.\n");
+			context.handling_assertion_failure = false;
+			return null;
+		}
+		case .CREATE_HEAP; #through;
+		case .DESTROY_HEAP;
+		{
+			context.handling_assertion_failure = true;
+			context.assertion_failed(#location(), "Heaps are not supported.\n");
+			context.handling_assertion_failure = false;
+			return null;
+		}
+		case .IS_THIS_YOURS;
 		{
 			// TODO: Actually support this
 			context.handling_assertion_failure = true;
@@ -135,7 +127,7 @@ allocator_proc ::
 			context.handling_assertion_failure = false;
 			return null;
 		}
-        case .CAPS;
+		case .CAPS;
 		{
 			// TODO: Actually support this
 			context.handling_assertion_failure = true;
@@ -143,14 +135,14 @@ allocator_proc ::
 			context.handling_assertion_failure = false;
 			return null;
 		}
-        case;
-        {
-            context.handling_assertion_failure = true;
-            context.assertion_failed(#location(), "Invalid or corrupt mode passed to allocator_proc().\n");
-            context.handling_assertion_failure = false;
-            return null;
-        }
-    }
+		case;
+		{
+			context.handling_assertion_failure = true;
+			context.assertion_failed(#location(), "Invalid or corrupt mode passed to allocator_proc().\n");
+			context.handling_assertion_failure = false;
+			return null;
+		}
+	}
 }
 
 make_arena_allocator :: (worker_index: s64, worker_count: s64, worker_nr_of_pages: s64, temp_nr_of_pages: s64) -> ArenaAllocator
