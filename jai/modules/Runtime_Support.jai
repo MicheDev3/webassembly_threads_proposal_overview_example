@@ -333,19 +333,21 @@ write_strings_unsynchronized :: (strings: ..string, to_standard_error := false) 
 	for strings write_string_unsynchronized(it, to_standard_error);
 }
 
-write_worker_log :: (worker_index: s64, message: string)
+write_string  :: (s: string, to_standard_error := false) #no_context #compiler
 {
 	wasm_lock(*CONSOLE_LOCK);
 	defer wasm_unlock(*CONSOLE_LOCK);
-
-	for string.["WASM: worker(", write_number(worker_index), ") ", message, "\n"]
-	{
-		write_strings_unsynchronized(it);
-	}
+	
+	write_string_unsynchronized(s, to_standard_error);
 }
 
-write_string  :: (s: string, to_standard_error := false)         #no_context #compiler;
-write_strings :: (strings: ..string, to_standard_error := false) #no_context #compiler;
+write_strings :: (strings: ..string, to_standard_error := false) #no_context #compiler
+{
+	wasm_lock(*CONSOLE_LOCK);
+	defer wasm_unlock(*CONSOLE_LOCK);
+	
+	write_strings_unsynchronized(..strings, to_standard_error);
+}
 
 #scope_module;
 
@@ -442,18 +444,6 @@ debug_break :: () #no_context
 	{
 		wasm_debug_break();
 	}
-}
-
-// one_time_init is exposed because maybe user libraries want to use a similar thing.
-one_time_init :: (synch_value: *s32, to_insert: Code) #expand
-{
-	// A routine to run the code in 'to_insert' only once, even if
-	// there are multiple threads. synch_value.* should be 0 at startup.
-	
-	// The values of synch_value.*:
-	// 0 = uninitialized, 1 = in progress init, 2 = initialized.
-	
-	// TODO: Write for wasm
 }
 
 // @Volatile: Context_Base must match internal compiler settings in general.h

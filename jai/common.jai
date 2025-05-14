@@ -1,6 +1,14 @@
 #import "Basic";
 
+Allocator :: #import "Allocator";
+
 MS2NS :: 1000000;
+
+FREE :: () #expand
+{
+    a := context.allocator;
+    a.proc(.FREE, 0, 0, null, a.data);
+}
 
 sleep :: (worker: *Worker, ms: s64)
 {

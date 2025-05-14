@@ -178,15 +178,12 @@ async function main()
 		{
 			const atomicModule = modules[0];
 			const mainModule   = modules[1];
-			
-			const memory_size = BigInt(%1);
-			const stack_size  = BigInt(%2);
-			
+						
 			const memory = new WebAssembly.Memory
 			(
 				{
-					"initial": memory_size,
-					"maximum": memory_size,
+					"initial": BigInt(%1),
+					"maximum": BigInt(%1),
 					"shared": true,
 					"address": "i64"
 				}
@@ -194,13 +191,12 @@ async function main()
 			
 			const workers  = [];
 			var workerCount = window.navigator.hardwareConcurrency;
-			if (workerCount > %4) { workerCount = %4; }
+			if (workerCount > %3) { workerCount = %3; }
 
-			var heap_end  = BigInt(%3);
+			const total_stack_size = BigInt(%2);
+			const stack_size = total_stack_size/BigInt(workerCount);
 			for (let i = 0; i < workerCount; i++)
 			{
-				var heap_base = heap_end - BigInt((workerCount - i)*100000);
-
 				// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
 				const worker = new Worker("/js/worker.js", { type: "module" });
 				workers.push(
@@ -212,11 +208,8 @@ async function main()
 								modules: [atomicModule, mainModule],
 								imports: {env: {memory: memory}},
 								worker_index: i,
-								stack_pointer: stack_size - BigInt(i*5000),
-								stack_high:    stack_size - BigInt(i*5000),
-								stack_low:     stack_size - BigInt(i*10000),
-								heap_base:     heap_base,
-								heap_end:      heap_end
+								stack_pointer: total_stack_size - BigInt(i)*stack_size,
+								worker_count: BigInt(workerCount-1)
 							}
 							worker.postMessage(data);
 							worker.onmessage = (event) => resolve(event.data);
@@ -224,8 +217,6 @@ async function main()
 						}
 					)
 				);
-				
-				heap_end = heap_base;
 			}
 			
 			// TODO: Understand why this is not triggered
@@ -323,19 +314,12 @@ function jaiTojsString(buffer, pointer, length)
 
 onmessage = async function(message)
 {
-	const { modules, imports, worker_index, stack_pointer, stack_high, stack_low, heap_base, heap_end } = message.data;
+	const { modules, imports, worker_index, stack_pointer, worker_count } = message.data;
 	
 	const atomicModule = modules[0];
 	const mainModule   = modules[1];
 	
 	const __stack_pointer = new WebAssembly.Global({ value: "i64", mutable: true }, stack_pointer);
-	const __stack_high    = new WebAssembly.Global({ value: "i64", mutable: true }, stack_high);
-	const __stack_low     = new WebAssembly.Global({ value: "i64", mutable: true }, stack_low);
-	// TODO: Changing the heap pointers does not work, I think, because these are baked in the binary
-	//{
-	const __heap_base     = new WebAssembly.Global({ value: "i64", mutable: true }, heap_base);
-	const __heap_end      = new WebAssembly.Global({ value: "i64", mutable: true }, heap_end);
-	//}
 
 	const memory = imports["env"]["memory"];
 	const atomicInstance = new WebAssembly.Instance(atomicModule, imports);
@@ -368,13 +352,13 @@ onmessage = async function(message)
 				wasm_wait:   atomicInstance.exports.wait,
 				wasm_lock:   atomicInstance.exports.lock,
 				wasm_unlock: atomicInstance.exports.unlock,
-				__stack_pointer, __stack_high, __stack_low, __heap_base, __heap_end
+				__stack_pointer,
 			}
 		}
 	);
 
 	// console.log("JS: worker(%d) started", worker_index);
-	mainInstance.exports.worker_main(BigInt(worker_index));
+	mainInstance.exports.worker_main(BigInt(worker_index), BigInt(worker_count));
 	// console.log("JS: worker(%d) terminated", worker_index);
 }
 
@@ -464,7 +448,9 @@ build_main ::
 	wasm_output_path: string,
 	js_output_path: string,
 	nr_pages: int,
-	max_number_of_workers: int
+	max_number_of_workers: int,
+	worker_nr_of_pages: int,
+	temp_nr_of_pages: int
 )
 {
 	w := compiler_create_workspace("Main");
@@ -497,44 +483,49 @@ build_main ::
 	}
 	child_options.import_path = import_paths;
 	
-	// old "clang       -Oz --target=wasm64 -nostdlib -c -o walloc.o walloc.c".
-	// new "clang -fPIC -Oz --target=wasm64 -nostdlib -c -o walloc.o walloc.c".
-	walloc_object_file_path := "modules/Walloc/walloc.o";
-	memory_size := nr_pages*WASM_MEMORY_PAGE_SIZE;
-	assert(memory_size > WASM_MEMORY_STACK_SIZE);
+	total_memory_size := nr_pages*WASM_MEMORY_PAGE_SIZE;
+	if total_memory_size <= WASM_MEMORY_STACK_SIZE
+	{
+		compiler_report(tprint("'total_memory_size(%)' must be greater than 'WASM_MEMORY_STACK_SIZE(%)'", total_memory_size, WASM_MEMORY_STACK_SIZE));
+	}
+	
+	// TODO: Add an extra padding?
+	if nr_pages <= worker_nr_of_pages
+	{
+		compiler_report(tprint("'nr_pages(%)' must be greater than 'worker_nr_of_pages(%)'", total_memory_size, worker_nr_of_pages));
+	}
+
+	// TODO: Add an extra padding?
+	if worker_nr_of_pages <= temp_nr_of_pages
+	{
+		compiler_report(tprint("'worker_nr_of_pages(%)' must be greater than 'temp_memory_size(%)'", worker_nr_of_pages, temp_nr_of_pages));
+	}
+
+	// clang -Oz --target=wasm64 -nostdlib -c -o utils.o utils.c
+	allocator_object_file_path := "modules/Allocator/utils.o";
 	child_options.additional_linker_arguments = .[
-		// "-r",
-		// "--export-all",
-		// "--shared",
 		"--no-entry",
-		// "--strip-all",
-		// "--export-dynamic",
-		// "--import-table",
-		// "--pie",
-		// "--export=__heap_base",
-		// "--stack-first",
-		// "--allow-undefined",
-		// "-shared",
-		// "--global-base=10",
-		// "--experimental-pic",
-		// "--unresolved-symbols=import-dynamic",
+		"--stack-first",
 		"-z", tprint("stack-size=%", WASM_MEMORY_STACK_SIZE),
 		"--import-memory", // memory will be created statically in the memory.wat file and shared with workers and main thread
 		"--shared-memory", // memory must be sharable in order for workers and main thread to work on the same chunk of memory (default behavior is copying from/to worker-main boundaries)
-		tprint("--initial-memory=%", memory_size), // shared memory is fixed (cannot grow at runtime) so we must specify the initial number pages available
-		tprint("--max-memory=%",     memory_size), // shared memory is fixed (cannot grow at runtime) so we must specify the maximum number pages available
+		tprint("--initial-memory=%", total_memory_size), // shared memory is fixed (cannot grow at runtime) so we must specify the initial number pages available
+		tprint("--max-memory=%",     total_memory_size), // shared memory is fixed (cannot grow at runtime) so we must specify the maximum number pages available
 		"--error-limit=0",
-		walloc_object_file_path,
+		allocator_object_file_path,
 	];
 	
-	// set_optimization(*child_options, .VERY_OPTIMIZED);
+	set_optimization(*child_options, .OPTIMIZED);
 	set_build_options(child_options, w);
-	// Replace the default allocator with Walloc (https://github.com/wingo/walloc).
-	remap_import(w, "*", "Default_Allocator", "Walloc");
+	
+	remap_import(w, "*", "Default_Allocator", "Allocator");
 	
 	compiler_begin_intercept(w);
 	
 	add_build_file("main.jai", w);
+	add_build_string(tprint("WORKER_NR_OF_PAGES :: %;", worker_nr_of_pages), w);
+	add_build_string(tprint("TEMP_NR_OF_PAGES :: %;", temp_nr_of_pages), w);
+	add_build_string(tprint("MAX_NUMBER_OF_WORKERS :: %;", max_number_of_workers), w);
 	
 	while true
 	{
@@ -588,7 +579,7 @@ build_main ::
 				for JsSource.[
 					.{
 						tprint("%main.js", js_output_path),
-						tprint(MAIN_JS_FILE_CONTENT, nr_pages, WASM_MEMORY_STACK_SIZE, memory_size, max_number_of_workers)
+						tprint(MAIN_JS_FILE_CONTENT, nr_pages, WASM_MEMORY_STACK_SIZE, max_number_of_workers)
 					},
 					.{
 						tprint("%worker.js", js_output_path),
@@ -634,6 +625,8 @@ build_main ::
 	nr_pages := 1000;
 	max_number_of_workers := 32;
 	wasm_compiler_path := "wat2wasm";
+	worker_nr_of_pages := 20;
+	temp_nr_of_pages   := 10;
 	args := parent_options.compile_time_command_line;
 	for args
 	{
@@ -652,7 +645,9 @@ build_main ::
 		wasm_output_path,
 		js_output_path,
 		nr_pages,
-		max_number_of_workers
+		max_number_of_workers,
+		worker_nr_of_pages,
+		temp_nr_of_pages,
 	);
 	
 	set_build_options_dc(.{do_output = false}, w);

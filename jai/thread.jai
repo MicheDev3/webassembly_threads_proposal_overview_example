@@ -9,7 +9,7 @@ Worker :: struct
 
 WorkerGroup :: struct
 {
-	workers: Array(Worker, 32);
+	workers: Array(Worker, MAX_NUMBER_OF_WORKERS);
 	
 	should_exit: bool;
 }
@@ -18,7 +18,7 @@ terminate_workers :: (worker: *Worker)
 {
 	group := context.worker_group;
 
-	write_worker_log(worker.index, "waking workers for termination");
+	print("worker(%): waking workers for termination\n", worker.index,, allocator_type=Allocator.TEMP);
 
 	group.should_exit = true;
 	for *worker: group.workers
@@ -29,39 +29,33 @@ terminate_workers :: (worker: *Worker)
 
 #scope_file
 
+WORKER_GROUP: WorkerGroup;
+
 #program_export
-worker_main :: (index: s64) #c_call
+worker_main :: (worker_index: s64, worker_count: s64) #c_call
 {
 	new_context: #Context;
-
 	push_context new_context
 	{
-		mutex    := 0;
-		sentinel := 0;
-		insert(*WORKER_GROUP.workers, index, .{index, *mutex, *sentinel});
-
-		// insert(*WORKER_GROUP.workers, index, .{index, New(s64), New(s64)});
+		arena_allocator := Allocator.make_arena_allocator(worker_index, worker_count, WORKER_NR_OF_PAGES, TEMP_NR_OF_PAGES);
+		context.allocator = .{Allocator.allocator_proc, *arena_allocator};
 		
-		worker := *WORKER_GROUP.workers[index];
+		insert(*WORKER_GROUP.workers, worker_index, .{worker_index, New(s64), New(s64)});
+		
+		worker := *WORKER_GROUP.workers[worker_index];
 		worker.semaphore.* = 1;
-		write_worker_log(worker.index, "starting");
+		print("worker(%): starting\n", worker.index,, allocator_type=Allocator.TEMP);
 
-		// print("Worker: %\n", worker.*);
 		// TODO: Probably have a fence here?
-		if index == 0
-		{
-			// print("Main(%): starting\n", index);
-									
+		if worker.index == 0
+		{			
 			while !WORKER_GROUP.should_exit
 			{
 				main_proc(worker,, worker_group=*WORKER_GROUP);
-			}			
-			// print("Main(%): exiting\n", index);
+			}
 		}
 		else
 		{
-			// print("Worker(%): starting\n", index);
-			
 			while !WORKER_GROUP.should_exit
 			{	
 				wait(worker);
@@ -74,11 +68,10 @@ worker_main :: (index: s64) #c_call
 				worker_proc(worker);
 			}
 			
-			// print("Worker(%): exiting\n", index);
 		}
 		
-		write_worker_log(worker.index, "terminating");
+		print("worker(%): terminating\n", worker.index,, allocator_type=Allocator.TEMP);
 	}
 }
 
-WORKER_GROUP: WorkerGroup;
+#scope_export
