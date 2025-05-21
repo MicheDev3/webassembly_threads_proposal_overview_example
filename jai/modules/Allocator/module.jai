@@ -1,7 +1,35 @@
+
+/////////////////////////////
+// Constants
+/////////////////////////////
+
+MAIN :: *_MAIN;
+TEMP :: *_TEMP;
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Globals
+/////////////////////////////
+
 #scope_file
 
 _MAIN :ArenaType = .Main;
 _TEMP :ArenaType = .Temp;
+
+NULL_ARENA: MemoryArena = .{null, -1, -1};
+
+#scope_export
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Enums
+/////////////////////////////
+
+#scope_file
 
 ArenaType :: enum
 {
@@ -9,23 +37,16 @@ ArenaType :: enum
 	Temp;
 }
 
-MemoryBlock :: struct
-{
-	main_base: *u8;
-	main_size: s64;
-	
-	temp_base: *u8;
-	temp_size: s64;
-}
-
-carve_memory_block :: (worker_index: s64, worker_count: s64, worker_memory_size: s64, temp_memory_size: s64) -> MemoryBlock #foreign;
-
 #scope_export
 
-MAIN :: *_MAIN;
-TEMP :: *_TEMP;
+/////////////////////////////
 
-#add_context allocator_type: *ArenaType = MAIN;
+
+/////////////////////////////
+// Structs
+/////////////////////////////
+
+#scope_file
 
 MemoryArena :: struct
 {
@@ -34,11 +55,73 @@ MemoryArena :: struct
 	used: s64;
 }
 
+#scope_export
+
 ArenaAllocator :: struct
 {
 	main: MemoryArena;
 	temp: MemoryArena;
 }
+
+/////////////////////////////
+
+/////////////////////////////
+// Functions
+/////////////////////////////
+
+#scope_file
+
+operator == :: inline (lhs: MemoryArena, rhs: MemoryArena) -> bool
+{
+    result := (
+        lhs.base == rhs.base
+        &&
+        lhs.size == rhs.size
+        &&
+        lhs.used == rhs.used
+    );
+    
+    return result;
+}
+
+#scope_export
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Context
+/////////////////////////////
+
+#add_context arena_type: *ArenaType = MAIN;
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Macros
+/////////////////////////////
+
+PUSH_ALLOCATION_TYPE :: (type: *ArenaType) #expand #no_debug
+{
+    old_type := context.arena_type;
+    context.arena_type = type;
+    `defer context.arena_type = old_type;
+}
+
+PUSH_ALLOCATION_TYPE :: (type: *ArenaType, code: Code) #expand
+{
+    PUSH_ALLOCATION_TYPE(type);
+    
+    #insert code;
+}
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Functions
+/////////////////////////////
 
 allocator_proc ::
 (
@@ -50,13 +133,15 @@ allocator_proc ::
 ) -> *void
 {
 	allocator: *ArenaAllocator = allocator_data;
+	assert(allocator.main != NULL_ARENA);
+	assert(allocator.temp != NULL_ARENA);
 	
 	if #complete mode ==
 	{
 		case .ALLOCATE;
 		{
 			arena: *MemoryArena;
-			if context.allocator_type ==
+            if context.arena_type ==
 			{
 				case TEMP; { arena = *allocator.temp; }
 				case MAIN; { arena = *allocator.main; }
@@ -66,13 +151,14 @@ allocator_proc ::
 			
 			result := arena.base + arena.used;
 			arena.used += requested_size;
+			assert(arena.used <= arena.size);
 			
 			return result;
 		}
 		case .FREE;
 		{
 			arena: *MemoryArena;
-			if context.allocator_type ==
+            if context.arena_type ==
 			{
 				case TEMP; { arena = *allocator.temp; }
 				case MAIN; { arena = *allocator.main; }
@@ -82,77 +168,76 @@ allocator_proc ::
 			
 			return null;
 		}
-		case .RESIZE;
-		{
-			context.handling_assertion_failure = true;
-			context.assertion_failed(#location(), "Resizing is not supported.\n");
-			context.handling_assertion_failure = false;
-			return null;
-		}
-		case .STARTUP;
-		{
-			context.handling_assertion_failure = true;
-			context.assertion_failed(#location(), "Startup are not supported.\n");
-			context.handling_assertion_failure = false;
-			return null;
-		}
 		case .SHUTDOWN;
 		{
-			context.handling_assertion_failure = true;
-			context.assertion_failed(#location(), "Shutdown are not supported.\n");
-			context.handling_assertion_failure = false;
+			allocator.main = NULL_ARENA;
+			allocator.temp = NULL_ARENA;
+			
 			return null;
 		}
-		case .THREAD_START; #through;
-		case .THREAD_STOP;
+		case .RESIZE;        #through;
+		case .STARTUP;       #through;
+		case .THREAD_START;  #through;
+		case .THREAD_\STOP;  #through;
+		case .CREATE_\HEAP;  #through;
+		case .DESTROY_HEAP;  #through;
+		case .IS_THIS_YOURS; #through; // TODO: Actually support this?
+		case .CAPS; 			       // TODO: Actually support this?
 		{
-			context.handling_assertion_failure = true;
-			context.assertion_failed(#location(), "Threading are not supported.\n");
-			context.handling_assertion_failure = false;
-			return null;
-		}
-		case .CREATE_HEAP; #through;
-		case .DESTROY_HEAP;
-		{
-			context.handling_assertion_failure = true;
-			context.assertion_failed(#location(), "Heaps are not supported.\n");
-			context.handling_assertion_failure = false;
-			return null;
-		}
-		case .IS_THIS_YOURS;
-		{
-			// TODO: Actually support this
-			context.handling_assertion_failure = true;
-			context.assertion_failed(#location(), "IS_THIS_YOURS is not supported.\n");
-			context.handling_assertion_failure = false;
-			return null;
-		}
-		case .CAPS;
-		{
-			// TODO: Actually support this
-			context.handling_assertion_failure = true;
-			context.assertion_failed(#location(), "CAPS is not supported.\n");
-			context.handling_assertion_failure = false;
+			assert(false, "Allocation mode not supported.");
 			return null;
 		}
 		case;
 		{
-			context.handling_assertion_failure = true;
-			context.assertion_failed(#location(), "Invalid or corrupt mode passed to allocator_proc().\n");
-			context.handling_assertion_failure = false;
+			assert(false, "Invalid or corrupt mode used.");
 			return null;
 		}
 	}
 }
 
-make_arena_allocator :: (worker_index: s64, worker_count: s64, worker_nr_of_pages: s64, temp_nr_of_pages: s64) -> ArenaAllocator
+/////////////////////////////
+
+
+/////////////////////////////
+// Platform
+/////////////////////////////
+
+#if OS == .WASM
 {
-	memory_block := carve_memory_block(worker_index, worker_count, worker_nr_of_pages, temp_nr_of_pages);
-	result: ArenaAllocator;
-	result.main.base = memory_block.main_base;
-	result.main.size = memory_block.main_size;
-	result.temp.base = memory_block.temp_base;
-	result.temp.size = memory_block.temp_size;
+
+#scope_file
+
+MemoryBlock :: struct
+{
+	main_base: *u8;
+	main_size: s64;
 	
-	return result;
+	temp_base: *u8;
+	temp_size: s64;
 }
+
+#scope_export
+
+carve_memory_block :: (memory_block_index: s64, memory_block_count: s64, worker_memory_size: s64, temp_memory_size: s64) -> MemoryBlock #foreign;
+
+}
+else
+{
+	// TODO: Support Windows
+	#assert false "OS unknown or currently unsupported!";
+}
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Imports
+/////////////////////////////
+
+#scope_file
+
+#import "Basic";
+
+#scope_export
+
+/////////////////////////////

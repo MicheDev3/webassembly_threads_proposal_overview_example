@@ -18,8 +18,8 @@ typedef struct
 
 MemoryBlock carve_memory_block
 (
-	s64 worker_index,
-	s64 worker_count,
+	s64 memory_block_index,
+	s64 memory_block_count,
 	s64 worker_nr_of_pages,
 	s64 temp_nr_of_pages
 )
@@ -30,14 +30,14 @@ MemoryBlock carve_memory_block
 	s64 worker_memory_size = worker_nr_of_pages*PAGE_SIZE;
 	s64 temp_memory_size   = temp_nr_of_pages  *PAGE_SIZE;
 	
-	s64 main_memory_size = total_memory_size - (worker_memory_size*worker_count);
+	s64 main_memory_size = total_memory_size - (worker_memory_size*memory_block_count);
 	
 	s64 total_size = main_memory_size;
 	s64 offset = 0;
-	if (worker_index > 0)
+	if (memory_block_index > 0)
 	{
 		total_size = worker_memory_size;
-		offset = main_memory_size + (worker_memory_size*(worker_index-1));
+		offset = main_memory_size + (worker_memory_size*(memory_block_index-1));
 	}
 	
 	MemoryBlock result;

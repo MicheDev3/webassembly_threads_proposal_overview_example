@@ -8,19 +8,17 @@
 
 #scope_export
 
-wasm_wake         :: (address: *s64)                                    #foreign;
-wasm_wait         :: (address: *s64)                                    #foreign;
-wasm_lock         :: (address: *s64)                                    #foreign;
-wasm_unlock       :: (address: *s64)                                    #foreign;
-wasm_sleep        :: (address: *s64, ns: s64)                           #foreign;
-wasm_debug_break  :: ()                                                 #foreign;
-wasm_write_string :: (count: s64, data: *void, to_standard_error: bool) #foreign;
+// TODO: Support other OSes
+
+// NOTE: Required to build for unix oses.
+OS_IS_UNIX :: OS == .MACOS || OS == .LINUX || OS == .PS5 || OS == .IOS || OS == .ANDROID;
 
 // @Cleanup: __element_duplicate should lose its c_call status, and also be faster...!
 __element_duplicate :: (start: *u8, num_elements: s64, size: s64) #c_call #no_aoc
 {
 	cursor := start + size;
-	for 1..num_elements-1 {
+	for 1..num_elements-1 
+	{
 		memcpy(cursor, start, size);
 		cursor += size;
 	}
@@ -74,8 +72,8 @@ write_number :: (number: s64, base := 10) -> string #must #no_context
 
 runtime_support_assertion_failed :: (loc: Source_Code_Location, message: string) -> bool
 {
-	wasm_lock(*CONSOLE_LOCK);
-	defer wasm_unlock(*CONSOLE_LOCK);
+	lock(*CONSOLE_LOCK);
+	defer unlock(*CONSOLE_LOCK);
 	
 	write_loc(loc, to_standard_error = true);
 	write_string_unsynchronized(": Assertion failed", to_standard_error = true);
@@ -133,8 +131,8 @@ runtime_support_default_logger :: (message: string, data: *void, info: Log_Info)
 {
 	if !message then return;
 
-	wasm_lock(*CONSOLE_LOCK);
-	defer wasm_unlock(*CONSOLE_LOCK);
+	lock(*CONSOLE_LOCK);
+	defer unlock(*CONSOLE_LOCK);
 	
 	to_standard_error := (info.common_flags & .ERROR) != 0;
 	
@@ -169,8 +167,8 @@ to_string :: (c_string: *u8) -> string #no_context
 // @Incomplete: Pass loc to Runtime_Support versions.
 __array_bounds_check_fail :: (index: s64, limit: s64, line_number: s64, filename: *u8) #no_context
 {
-	wasm_lock(*CONSOLE_LOCK);
-	defer wasm_unlock(*CONSOLE_LOCK);
+	lock(*CONSOLE_LOCK);
+	defer unlock(*CONSOLE_LOCK);
 	
 	// @Volatile: It is a good idea for these to match the error reports in constant-expression evaluation inside the compiler.
 	write_string_unsynchronized("Array bounds check failed. (The attempted index is ", to_standard_error = true);
@@ -202,8 +200,8 @@ __array_bounds_check_fail :: (index: s64, limit: s64, line_number: s64, filename
 
 __cast_bounds_check_fail :: (pre_value: s64, pre_flags: u32, post_value: s64, post_flags: u32, fatal: u8, line_number: s64, filename: *u8) #no_context
 {
-	wasm_lock(*CONSOLE_LOCK);
-	defer wasm_unlock(*CONSOLE_LOCK);
+	lock(*CONSOLE_LOCK);
+	defer unlock(*CONSOLE_LOCK);
 	
 	bits : s32 = 0;
 	
@@ -269,8 +267,8 @@ __cast_bounds_check_fail :: (pre_value: s64, pre_flags: u32, post_value: s64, po
 
 __null_pointer_check_fail :: (index: s64, line_number: s64, filename: *u8) #no_context
 {
-	wasm_lock(*CONSOLE_LOCK);
-	defer wasm_unlock(*CONSOLE_LOCK);
+	lock(*CONSOLE_LOCK);
+	defer unlock(*CONSOLE_LOCK);
 
 	// @Volatile: It is a good idea for these to match the error reports in constant-expression evaluation inside the compiler.
 	if index 
@@ -294,8 +292,8 @@ __null_pointer_check_fail :: (index: s64, line_number: s64, filename: *u8) #no_c
 
 __arithmetic_overflow :: (left: s64, right: s64, type_code: u16, line_number: s64, filename: *u8) #no_context #no_aoc
 {
-	wasm_lock(*CONSOLE_LOCK);
-	defer wasm_unlock(*CONSOLE_LOCK);
+	lock(*CONSOLE_LOCK);
+	defer unlock(*CONSOLE_LOCK);
 
 	// We have some free bits in type_code...!
 	fatal  := (type_code & 0x8000);
@@ -325,6 +323,8 @@ __arithmetic_overflow :: (left: s64, right: s64, type_code: u16, line_number: s6
 
 write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
 {
+	wasm_write_string :: (count: s64, data: *void, to_standard_error: bool) #foreign;
+
 	wasm_write_string(s.count, s.data, to_standard_error);
 }
 
@@ -335,16 +335,16 @@ write_strings_unsynchronized :: (strings: ..string, to_standard_error := false) 
 
 write_string  :: (s: string, to_standard_error := false) #no_context #compiler
 {
-	wasm_lock(*CONSOLE_LOCK);
-	defer wasm_unlock(*CONSOLE_LOCK);
+	lock(*CONSOLE_LOCK);
+	defer unlock(*CONSOLE_LOCK);
 	
 	write_string_unsynchronized(s, to_standard_error);
 }
 
 write_strings :: (strings: ..string, to_standard_error := false) #no_context #compiler
 {
-	wasm_lock(*CONSOLE_LOCK);
-	defer wasm_unlock(*CONSOLE_LOCK);
+	lock(*CONSOLE_LOCK);
+	defer unlock(*CONSOLE_LOCK);
 	
 	write_strings_unsynchronized(..strings, to_standard_error);
 }
@@ -367,8 +367,8 @@ my_panic :: () #no_context
 
 __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, filename: *u8) #no_context
 {
-	wasm_lock(*CONSOLE_LOCK);
-	defer wasm_unlock(*CONSOLE_LOCK);
+	lock(*CONSOLE_LOCK);
+	defer unlock(*CONSOLE_LOCK);
 
 	write_string_unsynchronized("Error: Attempt to call a compile-time procedure at runtime. The location of the call was: ", to_standard_error = true);
 	write_string_unsynchronized(to_string(filename), to_standard_error = true);
@@ -408,7 +408,7 @@ __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, file
 	}
 }
 
-#scope_module;
+#scope_module
 
 #if DEFINE_SYSTEM_ENTRY_POINT
 {
@@ -433,6 +433,13 @@ runtime_support_default_allocator_proc :: Default_Allocator.allocator_proc;
 
 #scope_export
 
+#scope_file
+
+#scope_export
+
+Mutex     :: s64;
+Semaphore :: s64;
+
 debug_break :: () #no_context
 {
 	if #compile_time
@@ -442,8 +449,47 @@ debug_break :: () #no_context
 	}
 	else
 	{
+		wasm_debug_break  :: () #foreign;
+
 		wasm_debug_break();
 	}
+}
+
+sleep :: inline (ms: s64) #no_context
+{
+	_sleep :: (address: *s64, ns: s64) #foreign "wasm_sleep";
+
+	sentinel := 0;
+
+	_sleep(*sentinel, ms*1000000);
+}
+
+wake :: inline (semaphore: *Semaphore) #no_context
+{
+	_wake :: (address: *s64) #foreign "wasm_wake";
+
+	_wake(semaphore);
+}
+
+wait :: inline (semaphore: *Semaphore) #no_context
+{
+	_wait :: (address: *s64) #foreign "wasm_wait";
+
+	_wait(semaphore);
+}
+
+lock :: inline (mutex: *Mutex) #no_context
+{
+	_lock :: (address: *s64) #foreign "wasm_lock";
+
+	_lock(mutex);
+}
+
+unlock :: inline (mutex: *Mutex) #no_context
+{
+	_unlock :: (address: *s64) #foreign "wasm_unlock";
+
+	_unlock(mutex);
 }
 
 // @Volatile: Context_Base must match internal compiler settings in general.h
@@ -512,4 +558,4 @@ set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
 
 #scope_module
 
-CONSOLE_LOCK: s64;
+CONSOLE_LOCK: Mutex;

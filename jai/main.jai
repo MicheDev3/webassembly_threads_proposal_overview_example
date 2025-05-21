@@ -1,36 +1,50 @@
-#load "common.jai";
-#load "thread.jai";
 
-COUNTER := 5;
+/////////////////////////////
+// Structs
+/////////////////////////////
 
-main_proc :: (worker: *Worker)
+Work :: struct
 {
-	if COUNTER == 2
-	{
-		group := context.worker_group;
-		wake(*group.workers[1]);
-		wake(*group.workers[1]);
-		wake(*group.workers[2]);
-	}
-	
-	COUNTER -= 1;
-	sleep(worker, 2000);
 
-	if COUNTER == 0 { terminate_workers(worker); }
-	
-	FREE(,, allocator_type=Allocator.TEMP);
 }
 
-worker_proc :: (worker: *Worker)
+/////////////////////////////
+
+
+/////////////////////////////
+// Functions
+/////////////////////////////
+
+main_proc :: (worker_group: *ThreadGroup)
 {
-	print("worker(%): working\n", worker.index, ,, allocator_type=Allocator.TEMP);
-	
-	sleep(worker, 1000);
-	
-	FREE(,, allocator_type=Allocator.TEMP);
+	FREE(,, arena_type=TEMP);
 }
 
 /*
   (global $__stack_pointer (;0;) (import "env" "__stack_pointer") (mut i64))
 */
 
+/////////////////////////////
+
+
+/////////////////////////////
+// Imports
+/////////////////////////////
+
+#import "Common";
+#import "Allocator";
+#import "Threading"()(
+	Work              =Work,
+	MAX_THREAD_COUNT  =MAX_THREAD_COUNT,
+	LOGGING           =true,
+	THREAD_MEMORY_SIZE= WORKER_NR_OF_PAGES,
+	TEMP_MEMORY_SIZE  = TEMP_NR_OF_PAGES,
+	ThreadProc        = (data: *void)
+	{
+		work := cast(*Work) data;
+
+		sleep(1000);
+	},
+);
+
+/////////////////////////////

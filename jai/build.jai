@@ -161,91 +161,7 @@ WAT_ATOMIC_FILE_CONTENT :: #string DONE
 )
 DONE;
 
-MAIN_JS_FILE_CONTENT :: #string DONE
-async function main()
-{
-	if (window.crossOriginIsolated)
-	{
-		const atomicUri = "/public/atomic.wasm";
-		const mainUri   = "/public/main.wasm"  ;
-		Promise.all(
-			[
-				WebAssembly.compileStreaming(fetch(atomicUri)),
-				WebAssembly.compileStreaming(fetch(mainUri  )),
-			]
-		)
-		.then ( async (modules) => 
-		{
-			const atomicModule = modules[0];
-			const mainModule   = modules[1];
-						
-			const memory = new WebAssembly.Memory
-			(
-				{
-					"initial": BigInt(%1),
-					"maximum": BigInt(%1),
-					"shared": true,
-					"address": "i64"
-				}
-			);
-			
-			const workers  = [];
-			var workerCount = window.navigator.hardwareConcurrency;
-			if (workerCount > %3) { workerCount = %3; }
-
-			const total_stack_size = BigInt(%2);
-			const stack_size = total_stack_size/BigInt(workerCount);
-			for (let i = 0; i < workerCount; i++)
-			{
-				// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
-				const worker = new Worker("/js/worker.js", { type: "module" });
-				workers.push(
-					new Promise(
-						(resolve) =>
-						{
-							const data = 
-							{
-								modules: [atomicModule, mainModule],
-								imports: {env: {memory: memory}},
-								worker_index: i,
-								stack_pointer: total_stack_size - BigInt(i)*stack_size,
-								worker_count: BigInt(workerCount-1)
-							}
-							worker.postMessage(data);
-							worker.onmessage = (event) => resolve(event.data);
-							worker.onerror   = reject;
-						}
-					)
-				);
-			}
-			
-			// TODO: Understand why this is not triggered
-			await Promise.all(workers)
-			.then(function(data)
-				{
-					console.log("All workers terminated");
-				}
-			)
-			.catch(function(error)
-				{
-					// something went wrong
-				}
-			);
-		})
-		.catch( (err)     => { console.error(err); } )
-		;
-	}
-	else
-	{
-		console.error("window.crossOriginIsolated return false. Start the server with ./server_start.sh");
-	}
-}
-
-main();
-
-DONE;
-
-WORKER_JS_FILE_CONTENT :: #string DONE
+COMMON_JS_FILE_CONTENT :: #string DONE
 // console.log and console.error always add newlines so we need to buffer the output from write_string
 // to simulate a more basic I/O behavior. We’ll flush it after a certain time so that you still
 // see the last line if you forget to terminate it with a newline for some reason.
@@ -312,18 +228,11 @@ function jaiTojsString(buffer, pointer, length)
 	return decoder.decode(tempBuffer);
 }
 
-onmessage = async function(message)
+export prepare_wasm_app function (modules, imports, stack_pointer)
 {
-	const { modules, imports, worker_index, stack_pointer, worker_count } = message.data;
-	
-	const atomicModule = modules[0];
-	const mainModule   = modules[1];
-	
-	const __stack_pointer = new WebAssembly.Global({ value: "i64", mutable: true }, stack_pointer);
-
 	const memory = imports["env"]["memory"];
-	const atomicInstance = new WebAssembly.Instance(atomicModule, imports);
-	const mainInstance = new WebAssembly.Instance(mainModule,
+	const atomics = new WebAssembly.Instance(modules[0], imports);
+	const result  = new WebAssembly.Instance(modules[1],
 		{
 			env:
 			{
@@ -347,19 +256,102 @@ onmessage = async function(message)
 					writeToConsoleLog(value, toStandardError);
 				},
 				wasm_debug_break: () => { debugger },
-				wasm_sleep:  atomicInstance.exports.sleep,
-				wasm_wake:   atomicInstance.exports.wake,
-				wasm_wait:   atomicInstance.exports.wait,
-				wasm_lock:   atomicInstance.exports.lock,
-				wasm_unlock: atomicInstance.exports.unlock,
-				__stack_pointer,
+				wasm_sleep:  atomics.exports.sleep,
+				wasm_wake:   atomics.exports.wake,
+				wasm_wait:   atomics.exports.wait,
+				wasm_lock:   atomics.exports.lock,
+				wasm_unlock: atomics.exports.unlock,
+				__stack_pointer: new WebAssembly.Global({ value: "i64", mutable: true }, stack_pointer),
 			}
 		}
 	);
+	
+	return result;
+}
 
-	// console.log("JS: worker(%d) started", worker_index);
-	mainInstance.exports.worker_main(BigInt(worker_index), BigInt(worker_count));
-	// console.log("JS: worker(%d) terminated", worker_index);
+DONE;
+
+APP_JS_FILE_CONTENT :: #string DONE
+
+import { prepare_wasm_app } from "/js/common.js";
+
+async function load_wasm_binary()
+{
+	if (window.crossOriginIsolated)
+	{
+		const atomicUri = "/public/atomic.wasm";
+		const appUri    = "/public/app.wasm"  ;
+		Promise.all(
+			[
+				WebAssembly.compileStreaming(fetch(atomicUri)),
+				WebAssembly.compileStreaming(fetch(appUri  )),
+			]
+		).then ( async (modules) => 
+			{
+				const atomicModule = modules[0];
+				const appModule    = modules[1];
+							
+				const memory = new WebAssembly.Memory
+				(
+					{
+						"initial": BigInt(%1),
+						"maximum": BigInt(%1),
+						"shared": true,
+						"address": "i64"
+					}
+				);
+				
+				var cpuCount = window.navigator.hardwareConcurrency;
+				if (cpuCount > %3) { cpuCount = %3; }
+	
+				const total_stack_size = BigInt(%2);
+				const stack_size = total_stack_size/BigInt(cpuCount);
+				const app = prepare_wasm_app(modules, imports, total_stack_size);
+				app.exports.init(cpuCount);
+				
+				for (let i = 1; i < cpuCount; i++)
+				{
+					// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
+					const worker = new Worker("/js/worker.js", { type: "module" });
+					new Promise(
+						(resolve) =>
+						{
+							const data = 
+							{
+								index: i-1,
+								modules: [atomicModule, appModule],
+								imports: {env: {memory: memory}},
+								stack_pointer: total_stack_size - BigInt(i)*stack_size,
+							}
+							worker.postMessage(data);
+							worker.onmessage = (event) => resolve(event.data);
+							worker.onerror   = reject;
+						}
+					)
+				}
+			}
+		).catch( (err)     => { console.error(err); } );
+	}
+	else
+	{
+		console.error("window.crossOriginIsolated return false. Start the server with ./server_start.sh");
+	}
+}
+
+load_wasm_binary();
+
+DONE;
+
+WORKER_JS_FILE_CONTENT :: #string DONE
+
+import { prepare_wasm_app } from "/js/common.js";
+
+onmessage = async function(message)
+{
+	const { index, modules, imports, stack_pointer } = message.data;
+
+	const app = prepare_wasm_app(modules, imports, stack_pointer);
+	app.exports.run_worker(BigInt(index));
 }
 
 DONE;
@@ -440,7 +432,7 @@ TEBIBYTES :: (value: s64) -> s64 #expand #no_debug
 // Functions
 /////////////////////////////
 
-build_main ::
+build_app ::
 (
 	parent_options: Build_Options,
 	wasm_compiler_path: string,
@@ -448,7 +440,7 @@ build_main ::
 	wasm_output_path: string,
 	js_output_path: string,
 	nr_pages: int,
-	max_number_of_workers: int,
+	max_thread_count: int,
 	worker_nr_of_pages: int,
 	temp_nr_of_pages: int
 )
@@ -465,7 +457,8 @@ build_main ::
 	child_options.emit_debug_info                     = .DWARF;
 	child_options.backtrace_on_crash                  = .OFF; // Runtime_Support_Crash_Handler doesn’t support WASM (yet?)
 	child_options.output_path                         = wasm_output_path;
-	child_options.output_executable_name              = "main";
+	child_options.output_executable_name              = "app";
+	child_options.runtime_support_definitions         = .OMIT;
 	// +bulk-memory: will map "memcpy" to "memory.copy" and "memset" to "memory.fill".
 	// +atomics    : necessary for setting "--shared-memory" linker flag.
 	// https://github.com/WebAssembly/tool-conventions/blob/main/Linking.md
@@ -525,7 +518,7 @@ build_main ::
 	add_build_file("main.jai", w);
 	add_build_string(tprint("WORKER_NR_OF_PAGES :: %;", worker_nr_of_pages), w);
 	add_build_string(tprint("TEMP_NR_OF_PAGES :: %;", temp_nr_of_pages), w);
-	add_build_string(tprint("MAX_NUMBER_OF_WORKERS :: %;", max_number_of_workers), w);
+	add_build_string(tprint("MAX_THREAD_COUNT :: %;", max_thread_count), w);
 	
 	while true
 	{
@@ -578,8 +571,12 @@ build_main ::
 				print("Generated js files:\n");
 				for JsSource.[
 					.{
-						tprint("%main.js", js_output_path),
-						tprint(MAIN_JS_FILE_CONTENT, nr_pages, WASM_MEMORY_STACK_SIZE, max_number_of_workers)
+						tprint("%common.js", js_output_path),
+						COMMON_JS_FILE_CONTENT,
+					},
+					.{
+						tprint("%app.js", js_output_path),
+						tprint(APP_JS_FILE_CONTENT, nr_pages, WASM_MEMORY_STACK_SIZE, max_thread_count)
 					},
 					.{
 						tprint("%worker.js", js_output_path),
@@ -623,7 +620,7 @@ build_main ::
 	}
 	
 	nr_pages := 1000;
-	max_number_of_workers := 32;
+	max_thread_count := 32;
 	wasm_compiler_path := "wat2wasm";
 	worker_nr_of_pages := 20;
 	temp_nr_of_pages   := 10;
@@ -634,18 +631,18 @@ build_main ::
 		{
 			case 0; { wasm_compiler_path    = it;             }
 			case 1; { nr_pages              = to_integer(it); }
-			case 2; { max_number_of_workers = to_integer(it); }
+			case 2; { max_thread_count = to_integer(it); }
 		}
 	}
 	
-	build_main(
+	build_app(
 		parent_options,
 		wasm_compiler_path,
 		wat_output_path,
 		wasm_output_path,
 		js_output_path,
 		nr_pages,
-		max_number_of_workers,
+		max_thread_count,
 		worker_nr_of_pages,
 		temp_nr_of_pages,
 	);
