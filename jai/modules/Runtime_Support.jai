@@ -24,7 +24,7 @@ __element_duplicate :: (start: *u8, num_elements: s64, size: s64) #c_call #no_ao
 	}
 }
 
-write_number :: (number: u64, base := 10, negative := false) -> string #must #no_context #no_abc #no_aoc
+write_number :: (number: u64, base := 10, negative := false) -> string #no_context #no_abc #no_aoc
 {
 	if number == 0 { return "0"; }
 	
@@ -63,7 +63,7 @@ write_number :: (number: u64, base := 10, negative := false) -> string #must #no
 	return result;
 }
 
-write_number :: (number: s64, base := 10) -> string #must #no_context
+write_number :: (number: s64, base := 10) -> string #no_context
 {
 	result := write_number(cast,no_check(u64)number, base, number < 0);
 	
@@ -321,13 +321,6 @@ __arithmetic_overflow :: (left: s64, right: s64, type_code: u16, line_number: s6
 	if fatal my_panic();
 }
 
-write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
-{
-	wasm_write_string :: (count: s64, data: *void, to_standard_error: bool) #foreign;
-
-	wasm_write_string(s.count, s.data, to_standard_error);
-}
-
 write_strings_unsynchronized :: (strings: ..string, to_standard_error := false) #no_context
 {
 	for strings write_string_unsynchronized(it, to_standard_error);
@@ -433,12 +426,30 @@ runtime_support_default_allocator_proc :: Default_Allocator.allocator_proc;
 
 #scope_export
 
+#if OS == .WASM
+{
+
+Mutex :: struct
+{
+	value: s64;
+}
+
+Semaphore :: struct
+{
+	value: s64;
+}
+
 #scope_file
 
-#scope_export
+wasm_debug_break  :: ()                                                 #foreign;
+wasm_sleep        :: (address: *s64, ns: s64)                           #foreign;
+wasm_wake         :: (address: *s64)                                    #foreign;
+wasm_wait         :: (address: *s64)                                    #foreign;
+wasm_lock         :: (address: *s64)                                    #foreign;
+wasm_unlock       :: (address: *s64)                                    #foreign;
+wasm_write_string :: (count: s64, data: *void, to_standard_error: bool) #foreign;
 
-Mutex     :: s64;
-Semaphore :: s64;
+#scope_export
 
 debug_break :: () #no_context
 {
@@ -449,47 +460,256 @@ debug_break :: () #no_context
 	}
 	else
 	{
-		wasm_debug_break  :: () #foreign;
-
 		wasm_debug_break();
+	}
+}
+
+sleep :: inline (ms: s32) #no_context
+{
+	sentinel := 0;
+
+	wasm_sleep(*sentinel, (cast(s64)ms)*1000000);
+}
+
+start :: (semaphore: *Semaphore, value: s32 = 0) #no_context
+{
+	semaphore.value = value;
+}
+
+close :: (semaphore: *Semaphore) #no_context
+{
+
+}
+
+wake :: inline (semaphore: *Semaphore) #no_context
+{
+	wasm_wake(*semaphore.value);
+}
+
+wait :: inline (semaphore: *Semaphore) #no_context
+{
+	wasm_wait(*semaphore.value);
+}
+
+start :: (mutex: *Mutex) #no_context
+{
+
+}
+
+close :: (mutex: *Mutex) #no_context
+{
+
+}
+
+lock :: inline (mutex: *Mutex) #no_context
+{
+	wasm_lock(*mutex.value);
+}
+
+unlock :: inline (mutex: *Mutex) #no_context
+{
+	wasm_unlock(*mutex.value);
+}
+
+write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
+{
+	wasm_write_string(s.count, s.data, to_standard_error);
+}
+
+}
+else #if OS == .WINDOWS
+{
+
+Mutex :: struct 
+{
+    DebugInfo:      *MutexDebug;
+    LockCount:      u32;
+    RecursionCount: u32;
+    OwningThread:   *void; // from the thread's ClientId->UniqueThread
+    LockSemaphore:  *void;
+    SpinCount:      u64;   // force size on 64-bit systems when packed
+}
+
+Semaphore :: struct
+{
+	value: *void;
+}
+
+#scope_file
+
+kernel32     :: #library,system "kernel32";
+
+InitializeCriticalSection :: (section: *Mutex)                                                                                           #foreign kernel32;
+WriteFile                 :: (handle: *void, buffer: *void, buffer_length: u32, written_result: *u32, overlapped: *void)        -> s32   #foreign kernel32;
+GetStdHandle              :: (handle: s32)                                                                                      -> *void #foreign kernel32;
+Sleep                     :: (milliseconds: s32)                                                                                -> void  #foreign kernel32;
+EnterCriticalSection      :: (lpCriticalSection: *Mutex)                                                                                 #foreign kernel32;
+LeaveCriticalSection      :: (lpCriticalSection: *Mutex)                                                                                 #foreign kernel32;
+CreateSemaphoreW          :: (lpSemaphoreAttributes: *SecurityAttributes, lInitialCount: s32, lMaximumCount: s32, lpName: *u16) -> *void #foreign kernel32;
+ReleaseSemaphore          :: (hSemaphore: *void, lReleaseCount: s32, lpPreviousCount: *s32)                                     -> BOOL  #foreign kernel32;
+CloseHandle               :: (handle: *void)                                                                                    -> s32   #foreign kernel32;
+WaitForSingleObject       :: (handle: *void, milliseconds: u32)                                                                 -> u32   #foreign kernel32;
+
+BOOL :: enum s32
+{
+    FALSE :: 0;
+    TRUE  :: 1;
+}
+
+SecurityAttributes :: struct 
+{
+    nLength: u32;
+    lpSecurityDescriptor: *void;
+    bInheritHandle: BOOL;
+}
+
+ListEntry :: struct
+{
+   Flink: *ListEntry;
+   Blink: *ListEntry;
+}
+
+MutexDebug :: struct 
+{
+    Type:                      u16;
+    CreatorBackTraceIndex:     u16;
+    CriticalSection:           *Mutex;
+    ProcessLocksList:          ListEntry;
+    EntryCount:                u32;
+    ContentionCount:           u32;
+    Flags:                     u32;
+    CreatorBackTraceIndexHigh: u16;
+    SpareWORD:                 u16;
+}
+
+STANDARD_OUTPUT: *void;
+STANDARD_ERROR:  *void;
+
+SYNC_INITTED: s32 = 0;
+
+one_time_init :: (synch_value: *s32, to_insert: Code) #expand 
+{
+    // A routine to run the code in 'to_insert' only once, even if
+    // there are multiple threads. synch_value.* should be 0 at startup.
+
+    // The values of synch_value.*:
+    // 0 = uninitialized, 1 = in progress init, 2 = initialized.
+
+    // Courtesy of Jeff Roberts.
+
+    while 1 
+    {
+        // @Warning: Apparently this read may not work on ARM, we need to look into it.
+        // The goal here is just to avoid the overhead of spamming the compare_and_swap.
+        if synch_value.* == 2  break;
+
+        success, old := compare_and_swap(synch_value, 0, 1);
+        if old == 
+        {
+            case 0;
+            {
+                #insert to_insert;
+            
+                if !compare_and_swap(synch_value, 1, 2) debug_break();  // Should not happen!
+            }
+            case 1;
+            {
+                for 1..4 #asm { pause; pause; pause; pause; pause; }
+            }
+            case 2; {}
+        }
+    }
+}
+
+init_synchronization :: () #no_context
+{
+    InitializeCriticalSection(*CONSOLE_LOCK);
+    
+    STD_OUTPUT_HANDLE :: -11;
+    STD_ERROR_HANDLE  :: -12;
+    STANDARD_OUTPUT = GetStdHandle(STD_OUTPUT_HANDLE);
+    STANDARD_ERROR  = GetStdHandle(STD_ERROR_HANDLE);
+}
+
+#scope_export
+
+debug_break :: () #no_context
+{
+	if #compile_time
+	{
+		compile_time_debug_break :: () #compiler #no_context;
+		compile_time_debug_break();
+	}
+	else
+	{
+		// TODO: Only supporting x64 for simplicity
+		#asm { int3; }
 	}
 }
 
 sleep :: inline (ms: s64) #no_context
 {
-	_sleep :: (address: *s64, ns: s64) #foreign "wasm_sleep";
+	Sleep(cast(s32)ms);
+}
 
-	sentinel := 0;
+start :: (semaphore: *Semaphore, value: s32 = 0) #no_context
+{
+	MAXIMUM :s32: 0x7fff_ffff;
+	semaphore.value = CreateSemaphoreW(null, value, MAXIMUM, null);
+}
 
-	_sleep(*sentinel, ms*1000000);
+close :: (semaphore: *Semaphore) #no_context
+{
+	CloseHandle(semaphore.value);
 }
 
 wake :: inline (semaphore: *Semaphore) #no_context
 {
-	_wake :: (address: *s64) #foreign "wasm_wake";
-
-	_wake(semaphore);
+	ReleaseSemaphore(semaphore.value, 1, null);
 }
 
 wait :: inline (semaphore: *Semaphore) #no_context
 {
-	_wait :: (address: *s64) #foreign "wasm_wait";
+	INFINITE :u32 : 0xffff_ffff;
+	WaitForSingleObject(semaphore.value, INFINITE);
+}
 
-	_wait(semaphore);
+start :: (mutex: *Mutex) #no_context
+{
+	InitializeCriticalSection(mutex);
+}
+
+close :: (mutex: *Mutex) #no_context
+{
+
 }
 
 lock :: inline (mutex: *Mutex) #no_context
 {
-	_lock :: (address: *s64) #foreign "wasm_lock";
-
-	_lock(mutex);
+	EnterCriticalSection(mutex);
 }
 
 unlock :: inline (mutex: *Mutex) #no_context
 {
-	_unlock :: (address: *s64) #foreign "wasm_unlock";
+	LeaveCriticalSection(mutex);
+}
 
-	_unlock(mutex);
+write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
+{
+	one_time_init(*SYNC_INITTED, init_synchronization());
+
+	written: u32;
+    handle := ifx to_standard_error then STANDARD_ERROR else STANDARD_OUTPUT;
+    status := WriteFile(handle, s.data, cast(u32) s.count, *written, null);
+}
+
+}
+else #if OS == .LINUX
+{
+
+}
+else
+{
 }
 
 // @Volatile: Context_Base must match internal compiler settings in general.h

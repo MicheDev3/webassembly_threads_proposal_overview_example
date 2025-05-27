@@ -3,9 +3,6 @@
 // Constants
 /////////////////////////////
 
-MAIN :: *_MAIN;
-TEMP :: *_TEMP;
-
 /////////////////////////////
 
 
@@ -14,9 +11,6 @@ TEMP :: *_TEMP;
 /////////////////////////////
 
 #scope_file
-
-_MAIN :ArenaType = .Main;
-_TEMP :ArenaType = .Temp;
 
 NULL_ARENA: MemoryArena = .{null, -1, -1};
 
@@ -29,15 +23,11 @@ NULL_ARENA: MemoryArena = .{null, -1, -1};
 // Enums
 /////////////////////////////
 
-#scope_file
-
 ArenaType :: enum
 {
 	Main;
 	Temp;
 }
-
-#scope_export
 
 /////////////////////////////
 
@@ -61,6 +51,12 @@ ArenaAllocator :: struct
 {
 	main: MemoryArena;
 	temp: MemoryArena;
+}
+
+ArenaParams :: struct
+{
+	arena: ArenaType;
+	alignment: s64;
 }
 
 /////////////////////////////
@@ -93,7 +89,7 @@ operator == :: inline (lhs: MemoryArena, rhs: MemoryArena) -> bool
 // Context
 /////////////////////////////
 
-#add_context arena_type: *ArenaType = MAIN;
+#add_context params: ArenaParams = .{.Main, 4};
 
 /////////////////////////////
 
@@ -102,18 +98,18 @@ operator == :: inline (lhs: MemoryArena, rhs: MemoryArena) -> bool
 // Macros
 /////////////////////////////
 
-PUSH_ALLOCATION_TYPE :: (type: *ArenaType) #expand #no_debug
+PUSH_ALLOCATION_PARAMS :: (params: ArenaParams) #expand #no_debug
 {
-    old_type := context.arena_type;
-    context.arena_type = type;
-    `defer context.arena_type = old_type;
+	old_params := context.params;
+	context.params = params;
+	`defer context.params = old_params;
 }
 
-PUSH_ALLOCATION_TYPE :: (type: *ArenaType, code: Code) #expand
+PUSH_ALLOCATION_PARAMS :: (params: ArenaParams, code: Code) #expand
 {
-    PUSH_ALLOCATION_TYPE(type);
-    
-    #insert code;
+	PUSH_ALLOCATION_PARAMS(params);
+	
+	#insert code;
 }
 
 /////////////////////////////
@@ -141,16 +137,19 @@ allocator_proc ::
 		case .ALLOCATE;
 		{
 			arena: *MemoryArena;
-            if context.arena_type ==
+            if context.params.arena ==
 			{
-				case TEMP; { arena = *allocator.temp; }
-				case MAIN; { arena = *allocator.main; }
+				case .Temp; { arena = *allocator.temp; }
+				case .Main; { arena = *allocator.main; }
 			}
-			
-			// TODO: Support alignment
+
+			alignment := context.params.alignment;
+			// NOTE: Makinkg sure alignment is a power of two
+            assert((alignment & ~(alignment - 1)) == alignment);
+			assert(alignment <= 128);
 			
 			result := arena.base + arena.used;
-			arena.used += requested_size;
+			arena.used += align_forward(requested_size, alignment);
 			assert(arena.used <= arena.size);
 			
 			return result;
@@ -158,10 +157,10 @@ allocator_proc ::
 		case .FREE;
 		{
 			arena: *MemoryArena;
-            if context.arena_type ==
+            if context.params.arena ==
 			{
-				case TEMP; { arena = *allocator.temp; }
-				case MAIN; { arena = *allocator.main; }
+				case .Temp; { arena = *allocator.temp; }
+				case .Main; { arena = *allocator.main; }
 			}
 			
 			arena.used = 0;
@@ -195,37 +194,14 @@ allocator_proc ::
 	}
 }
 
-/////////////////////////////
-
-
-/////////////////////////////
-// Platform
-/////////////////////////////
-
-#if OS == .WASM
+params :: inline (arena: ArenaType, alignment: s64 = 4) -> ArenaParams
 {
-
-#scope_file
-
-MemoryBlock :: struct
-{
-	main_base: *u8;
-	main_size: s64;
+	result: ArenaParams;
+	result.arena     = arena;
+	result.alignment = alignment;
 	
-	temp_base: *u8;
-	temp_size: s64;
-}
-
-#scope_export
-
-carve_memory_block :: (memory_block_index: s64, memory_block_count: s64, worker_memory_size: s64, temp_memory_size: s64) -> MemoryBlock #foreign;
-
-}
-else
-{
-	// TODO: Support Windows
-	#assert false "OS unknown or currently unsupported!";
-}
+	return result;
+} 
 
 /////////////////////////////
 

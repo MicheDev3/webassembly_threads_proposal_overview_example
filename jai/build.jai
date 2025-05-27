@@ -370,12 +370,63 @@ DONE;
 // Enums
 /////////////////////////////
 
+Platform :: enum
+{
+	None;
+
+	Wasm;
+	Win64;
+	Linux;
+}
+
 /////////////////////////////
 
 
 /////////////////////////////
 // Structs
 /////////////////////////////
+
+Options :: struct
+{
+	optimise: bool;
+	max_thread_count: s64;
+	
+	max_thread_count = 32;
+}
+
+Win64Options :: struct
+{
+	main_memory_size:   s64;
+	temp_memory_size:   s64;
+	thread_memory_size: s64;
+	
+	main_memory_size   = #run MEBIBYTES(100);
+	temp_memory_size   = #run MEBIBYTES(5);
+	thread_memory_size = #run MEBIBYTES(10);
+}
+
+WasmOptions :: struct
+{
+	compiler_path: string;
+	
+	js_\ output_path: string;
+	wat_\output_path: string;
+	wasm_output_path: string;
+	
+	main_nr_pages:   s64;
+	temp_nr_pages:   s64;
+	worker_nr_pages: s64;
+
+	compiler_path   = "wat2wasm";
+	
+	js_\ output_path = "js";
+	wat_\output_path = "wat";
+	wasm_output_path = "public";
+	
+	main_nr_pages   = 1000;
+	temp_nr_pages   = 10;
+	worker_nr_pages = 20;
+}
 
 WatToWasmTarget :: struct
 {
@@ -432,71 +483,103 @@ TEBIBYTES :: (value: s64) -> s64 #expand #no_debug
 // Functions
 /////////////////////////////
 
-build_app ::
-(
-	parent_options: Build_Options,
-	wasm_compiler_path: string,
-	wat_output_path: string,
-	wasm_output_path: string,
-	js_output_path: string,
-	nr_pages: int,
-	max_thread_count: int,
-	worker_nr_of_pages: int,
-	temp_nr_of_pages: int
-)
+build_win64 :: (build_parent_options: Build_Options, options: Options, platform_options: Win64Options)
 {
-	w := compiler_create_workspace("Main");
+	w := compiler_create_workspace("Win64");
 	
-	child_options := get_build_options(w);
-	copy_commonly_propagated_fields(parent_options, *child_options);
+	build_child_options := get_build_options(w);
+	copy_commonly_propagated_fields(build_parent_options, *build_child_options);
 	
-	child_options.output_type                         = .DYNAMIC_LIBRARY;
-	child_options.backend                             = .LLVM;
-	child_options.os_target                           = .WASM;
-	child_options.cpu_target                          = .CUSTOM;
-	child_options.emit_debug_info                     = .DWARF;
-	child_options.backtrace_on_crash                  = .OFF; // Runtime_Support_Crash_Handler doesn’t support WASM (yet?)
-	child_options.output_path                         = wasm_output_path;
-	child_options.output_executable_name              = "app";
-	child_options.runtime_support_definitions         = .OMIT;
-	// +bulk-memory: will map "memcpy" to "memory.copy" and "memset" to "memory.fill".
-	// +atomics    : necessary for setting "--shared-memory" linker flag.
-	// https://github.com/WebAssembly/tool-conventions/blob/main/Linking.md
-	child_options.llvm_options.target_system_features = "+bulk-memory,+atomics";
-	// child_options.llvm_options.target_system_features = "+bulk-memory,+atomics,+multimemory,+multivalue";
-	// child_options.llvm_options.target_system_features = "+bulk-memory,+atomics,+mutable-globals";
-	child_options.llvm_options.enable_split_modules   = false;
-	child_options.llvm_options.function_sections      = true; // To get around "LLVM ERROR: section already has a defining function: .text"
+	build_child_options.backend                     = .LLVM;
+	build_child_options.output_executable_name      = "win64";
+	build_child_options.runtime_support_definitions = .OMIT;
 	
 	import_paths: [..]string;
 	array_add(*import_paths, tprint("%modules", #filepath));
-	for child_options.import_path
+	for build_child_options.import_path
 	{
 		array_add(*import_paths, it);
 	}
-	child_options.import_path = import_paths;
+	build_child_options.import_path = import_paths;
+
+	if options.optimise
+	{
+		set_optimization(*build_child_options, .VERY_OPTIMIZED);
+	}
 	
-	total_memory_size := nr_pages*WASM_MEMORY_PAGE_SIZE;
+	set_build_options(build_child_options, w);
+	
+	remap_import(w, "*", "Default_Allocator", "Allocator");
+	
+	compiler_begin_intercept(w);
+	
+	add_build_file("win64_main.jai", w);
+	add_build_string(tprint("THREAD_MEMORY_SIZE :: %;", platform_options.thread_memory_size), w);
+	add_build_string(tprint("MAIN_MEMORY_SIZE :: %;", platform_options.main_memory_size), w);
+	add_build_string(tprint("TEMP_MEMORY_SIZE :: %;", platform_options.temp_memory_size), w);
+	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
+	
+	compiler_end_intercept(w);
+}
+
+build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_options: WasmOptions)
+{
+	w := compiler_create_workspace("Wasm");
+	
+	build_child_options := get_build_options(w);
+	copy_commonly_propagated_fields(build_parent_options, *build_child_options);
+	
+	build_child_options.output_type                         = .DYNAMIC_LIBRARY;
+	build_child_options.backend                             = .LLVM;
+	build_child_options.os_target                           = .WASM;
+	build_child_options.cpu_target                          = .CUSTOM;
+	build_child_options.emit_debug_info                     = .DWARF;
+	build_child_options.backtrace_on_crash                  = .OFF; // Runtime_Support_Crash_Handler doesn’t support WASM (yet?)
+	build_child_options.output_path                         = platfomr_options.wasm_output_path;
+	build_child_options.output_executable_name              = "app";
+	build_child_options.runtime_support_definitions         = .OMIT;
+	// +bulk-memory: will map "memcpy" to "memory.copy" and "memset" to "memory.fill".
+	// +atomics    : necessary for setting "--shared-memory" linker flag.
+	// https://github.com/WebAssembly/tool-conventions/blob/main/Linking.md
+	build_child_options.llvm_options.target_system_features = "+bulk-memory,+atomics";
+	// build_child_options.llvm_options.target_system_features = "+bulk-memory,+atomics,+multimemory,+multivalue";
+	// build_child_options.llvm_options.target_system_features = "+bulk-memory,+atomics,+mutable-globals";
+	build_child_options.llvm_options.enable_split_modules   = false;
+	build_child_options.llvm_options.function_sections      = true; // To get around "LLVM ERROR: section already has a defining function: .text"
+	
+	import_paths: [..]string;
+	array_add(*import_paths, tprint("%modules", #filepath));
+	for build_child_options.import_path
+	{
+		array_add(*import_paths, it);
+	}
+	build_child_options.import_path = import_paths;
+	
+	total_memory_size := platfomr_options.main_nr_pages*WASM_MEMORY_PAGE_SIZE;
 	if total_memory_size <= WASM_MEMORY_STACK_SIZE
 	{
 		compiler_report(tprint("'total_memory_size(%)' must be greater than 'WASM_MEMORY_STACK_SIZE(%)'", total_memory_size, WASM_MEMORY_STACK_SIZE));
 	}
 	
 	// TODO: Add an extra padding?
-	if nr_pages <= worker_nr_of_pages
+	if platfomr_options.main_nr_pages <= platfomr_options.worker_nr_pages
 	{
-		compiler_report(tprint("'nr_pages(%)' must be greater than 'worker_nr_of_pages(%)'", total_memory_size, worker_nr_of_pages));
+		compiler_report(tprint("'nr_pages(%)' must be greater than 'worker_nr_of_pages(%)'", total_memory_size, platfomr_options.worker_nr_pages));
 	}
 
 	// TODO: Add an extra padding?
-	if worker_nr_of_pages <= temp_nr_of_pages
+	if platfomr_options.worker_nr_pages <= platfomr_options.temp_nr_pages
 	{
-		compiler_report(tprint("'worker_nr_of_pages(%)' must be greater than 'temp_memory_size(%)'", worker_nr_of_pages, temp_nr_of_pages));
+		compiler_report(tprint("'worker_nr_of_pages(%)' must be greater than 'temp_memory_size(%)'", platfomr_options.worker_nr_pages, platfomr_options.temp_nr_pages));
 	}
 
 	// clang -Oz --target=wasm64 -nostdlib -c -o utils.o utils.c
+/*
+  	(global $__stack_pointer (;0;) (import "env" "__stack_pointer") (mut i64))
+*/
+
 	allocator_object_file_path := "modules/Allocator/utils.o";
-	child_options.additional_linker_arguments = .[
+	build_child_options.additional_linker_arguments = .[
 		"--no-entry",
 		"--stack-first",
 		"-z", tprint("stack-size=%", WASM_MEMORY_STACK_SIZE),
@@ -508,17 +591,22 @@ build_app ::
 		allocator_object_file_path,
 	];
 	
-	set_optimization(*child_options, .OPTIMIZED);
-	set_build_options(child_options, w);
+	if options.optimise
+	{
+		// TODO: VERY_OPTIMIZED seems to break things, understand why
+		// set_optimization(*build_child_options, .VERY_OPTIMIZED);
+		set_optimization(*build_child_options, .OPTIMIZED);
+	}
+	set_build_options(build_child_options, w);
 	
 	remap_import(w, "*", "Default_Allocator", "Allocator");
 	
 	compiler_begin_intercept(w);
 	
-	add_build_file("main.jai", w);
-	add_build_string(tprint("WORKER_NR_OF_PAGES :: %;", worker_nr_of_pages), w);
-	add_build_string(tprint("TEMP_NR_OF_PAGES :: %;", temp_nr_of_pages), w);
-	add_build_string(tprint("MAX_THREAD_COUNT :: %;", max_thread_count), w);
+	add_build_file("wasm_main.jai", w);
+	add_build_string(tprint("WORKER_NR_OF_PAGES :: %;", platfomr_options.worker_nr_pages), w);
+	add_build_string(tprint("TEMP_NR_OF_PAGES :: %;", platfomr_options.temp_nr_pages), w);
+	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
 	
 	while true
 	{
@@ -529,15 +617,15 @@ build_app ::
 			{
 				wat_files: []WatToWasmTarget = .[
 					.{
-						tprint("%atomic.wat",  wat_output_path),
-						tprint("%atomic.wasm", wasm_output_path),
-						tprint(WAT_ATOMIC_FILE_CONTENT, nr_pages),
+						tprint("%atomic.wat",  platfomr_options.wat_\output_path),
+						tprint("%atomic.wasm", platfomr_options.wasm_output_path),
+						tprint(WAT_ATOMIC_FILE_CONTENT, platfomr_options.main_nr_pages),
 						string.[],
 					}
 				];
 				
-				print("\nSelected % memory pages (64Kib per page)\n", nr_pages);
-				print("WASM compiler: \"%\"\n", wasm_compiler_path);
+				print("\nSelected % memory pages (64Kib per page)\n", platfomr_options.main_nr_pages);
+				print("WASM compiler: \"%\"\n", platfomr_options.compiler_path);
 				
 				for wat_files
 				{
@@ -547,7 +635,7 @@ build_app ::
 					}
 					
 					args: [..]string;
-					array_add(*args, wasm_compiler_path);
+					array_add(*args, platfomr_options.compiler_path);
 					array_add(*args, "--enable-threads");
 					array_add(*args, "--enable-memory64");
 					for flag: it.flags { array_add(*args, flag); }
@@ -571,15 +659,15 @@ build_app ::
 				print("Generated js files:\n");
 				for JsSource.[
 					.{
-						tprint("%common.js", js_output_path),
+						tprint("%common.js", platfomr_options.js_\ output_path),
 						COMMON_JS_FILE_CONTENT,
 					},
 					.{
-						tprint("%app.js", js_output_path),
-						tprint(APP_JS_FILE_CONTENT, nr_pages, WASM_MEMORY_STACK_SIZE, max_thread_count)
+						tprint("%app.js", platfomr_options.js_\ output_path),
+						tprint(APP_JS_FILE_CONTENT, platfomr_options.main_nr_pages, WASM_MEMORY_STACK_SIZE, options.max_thread_count)
 					},
 					.{
-						tprint("%worker.js", js_output_path),
+						tprint("%worker.js", platfomr_options.js_\ output_path),
 						WORKER_JS_FILE_CONTENT,
 					}
 				]
@@ -605,47 +693,97 @@ build_app ::
 #run
 {
 	w := get_current_workspace();
-	parent_options := get_build_options(w);
+	build_parent_options := get_build_options(w);
 	
-	_, project_folder := split_from_right(#filepath, "jai");
-	js_output_path   := tprint("%js/",     project_folder);
-	wat_output_path  := tprint("%wat/",    project_folder);
-	wasm_output_path := tprint("%public/", project_folder);
-	for string.[wat_output_path, wasm_output_path, js_output_path]
+	platform: Platform = .None;
+	options: Options; platform_options: Win64Options; w_options: WasmOptions;
+
+	index: s64;
+	args := build_parent_options.compile_time_command_line;
+	while index < args.count
 	{
-		if !make_directory_if_it_does_not_exist(it)
+		defer index += 1;
+
+		option := args[index];
+		if option ==
 		{
-			compiler_report(tprint("Failed to create directory '%'", it));
+			case "-optimise";
+			{
+				options.optimise = true;
+			}
+			case "-platform";
+			{
+				index += 1;
+				
+				if args[index] == 
+				{
+					case "wasm";  { platform = .Wasm;  }
+					case "win64"; { platform = .Win64; }
+					case "linux"; { platform = .Linux; }
+				}
+			}
+			case "-wasm-compiler-path";
+			{
+				index += 1;
+				
+				w_options.compiler_path = args[index];
+			}
+			case "-wasm-nr-pages";
+			{
+				index += 1;
+				
+				w_options.main_nr_pages = to_integer(args[index]);
+			}
+			case "-max-thread-count";
+			{
+				index += 1;
+				
+				options.max_thread_count = to_integer(args[index]);
+			}
+			case;
+			{
+				compiler_report(tprint("Unknown option '%'", option));
+			}
 		}
 	}
 	
-	nr_pages := 1000;
-	max_thread_count := 32;
-	wasm_compiler_path := "wat2wasm";
-	worker_nr_of_pages := 20;
-	temp_nr_of_pages   := 10;
-	args := parent_options.compile_time_command_line;
-	for args
+	if #complete platform == 
 	{
-		if it_index ==
+		case .None;
 		{
-			case 0; { wasm_compiler_path    = it;             }
-			case 1; { nr_pages              = to_integer(it); }
-			case 2; { max_thread_count = to_integer(it); }
+			compiler_report("Unset or unknown platform");
+		}
+		case .Wasm;
+		{
+			// TODO: At the moment the number of threads, for wasm, must be a power of two.
+			// If not unaligned memory access runtime errors will occurs, fix!
+			_, project_folder := split_from_right(#filepath, "jai");
+			w_options.js_\ output_path = sprint("%js/",     project_folder);
+			w_options.wat_\output_path = sprint("%wat/",    project_folder);
+			w_options.wasm_output_path = sprint("%public/", project_folder);
+			for string.[
+				w_options.js_\ output_path,
+				w_options.wat_\output_path,
+				w_options.wasm_output_path,
+			]
+			{
+				if !make_directory_if_it_does_not_exist(it)
+				{
+					compiler_report(tprint("Failed to create directory '%'", it));
+				}
+			}
+			
+			build_wasm(build_parent_options, options, w_options);
+		}
+		case .Win64;
+		{
+			build_win64(build_parent_options, options, platform_options);
+		}
+		case .Linux;
+		{
+			compiler_report("Linux currently unsupported");
 		}
 	}
-	
-	build_app(
-		parent_options,
-		wasm_compiler_path,
-		wat_output_path,
-		wasm_output_path,
-		js_output_path,
-		nr_pages,
-		max_thread_count,
-		worker_nr_of_pages,
-		temp_nr_of_pages,
-	);
 	
 	set_build_options_dc(.{do_output = false}, w);
 }
@@ -658,7 +796,6 @@ build_app ::
 /////////////////////////////
 
 #import "Basic";
-
 #import "Compiler";
 #import "File";
 #import "Process";

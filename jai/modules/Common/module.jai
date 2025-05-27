@@ -171,8 +171,10 @@ ALLOCATE :: () #expand
 	context.allocator.proc(.ALLOCATE, 0, 0, null, context.allocator.data);
 }
 
-FREE :: () #expand
+FREE :: (arena: ArenaType) #expand
 {
+	PUSH_ALLOCATION_PARAMS(params(arena));
+
     context.allocator.proc(.FREE, 0, 0, null, context.allocator.data);
 }
 
@@ -423,6 +425,7 @@ sentinel :: inline (list: *$L/FreeLinkedList) -> *list.Link
 // Imports
 /////////////////////////////
 
+#import "Allocator";
 #import "Basic";
 
 /////////////////////////////
