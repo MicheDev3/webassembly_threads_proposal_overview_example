@@ -1,11 +1,24 @@
 
 /////////////////////////////
+// Enums
+/////////////////////////////
+
+WorkType :: enum
+{
+	Test1;
+	Test2;
+}
+
+/////////////////////////////
+
+
+/////////////////////////////
 // Structs
 /////////////////////////////
 
 Work :: struct
 {
-
+	type: WorkType;
 }
 
 /////////////////////////////
@@ -18,6 +31,18 @@ Work :: struct
 thread_proc :: (data: *void)
 {
 	work := cast(*Work) data;
+	
+	if #complete work.type ==
+	{
+		case .Test1; 
+		{
+		
+		}
+		case .Test2; 
+		{
+		
+		}
+	} 
 	
 	sleep(1000);
 }

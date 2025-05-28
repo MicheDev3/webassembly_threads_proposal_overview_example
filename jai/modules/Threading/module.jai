@@ -35,7 +35,9 @@ ThreadGroup :: struct
     {
 		Base :: struct
 		{
-			WorkList :: FreeLinkedList(*Work, DOUBLE_LINK=true);
+			WorkList :: FreeLinkedList(Work, DOUBLE_LINK=true);
+			
+			index: s64;
 
 			allocator: Allocator;
 		
@@ -46,12 +48,6 @@ ThreadGroup :: struct
 			
 			available: WorkList;
 			completed: WorkList;
-		
-#if LOGGING
-{
-			builder: String_Builder;
-}
-		
 		}
 	
         DESIRED_SIZE :: #run align_forward(size_of(Base), CACHE_LINE_SIZE);
@@ -79,35 +75,38 @@ ThreadGroup :: struct
 // Functions
 /////////////////////////////
 
-init_thread :: inline (arena: *ArenaAllocator)
+init_thread :: inline (index: s64, arena: *ArenaAllocator)
 {
 	thread := insert(*THREAD_GROUP.threads);
+	thread.index = index;
 	start(*thread.semaphore);
 	start(*thread.available_mutex);
 	start(*thread.completed_mutex);
 	thread.allocator = .{allocator_proc, arena};
-	thread.available = make_free_list(*Work, DOUBLE_LINK=true,, thread.allocator);
-	thread.completed = make_free_list(*Work, DOUBLE_LINK=true,, thread.allocator);
+	thread.available = make_free_list(Work, DOUBLE_LINK=true,, thread.allocator);
+	thread.completed = make_free_list(Work, DOUBLE_LINK=true,, thread.allocator);	
 }
 
 add_work :: inline (work: Work)
 {
-	random1 := cast(u32)random_get_within_range(0, THREAD_GROUP.threads.stored);
-	random2 := cast(u32)random_get_within_range(0, THREAD_GROUP.threads.stored);
+	random1 := cast(u32)random_get_within_range(0, cast(float)THREAD_GROUP.threads.stored);
+	random2 := cast(u32)random_get_within_range(0, cast(float)THREAD_GROUP.threads.stored);
 	
 	thread1 := *THREAD_GROUP.threads[random1];
 	thread2 := *THREAD_GROUP.threads[random2];
 
-	thread: *Thread = (
-		ifx count(thread1.available) > count(thread2.available)
+	thread := (
+		ifx count(*thread1.available) > count(*thread2.available)
 		then thread2 
 		else thread1
 	);
 	
 PUSH_LOCK(*thread.available_mutex, #code
 {
-	insert(*thread.completed, work, ,, thread.allocator);
+	insert(*thread.available, work, ,, thread.allocator);
 });
+
+	write_message("Thread(%): work added\n", thread.index);
 
 	wake(*thread.semaphore);
 }
@@ -124,7 +123,7 @@ run_thread :: inline (index: s64)
 		wait(*thread.semaphore);
 		if THREAD_GROUP.shutdown { break; }
 		
-		work: *Work = null;
+		work: Work = ---;
 		link: *thread.WorkList.Link;
 PUSH_LOCK(*thread.available_mutex, #code
 {
@@ -135,9 +134,8 @@ PUSH_LOCK(*thread.available_mutex, #code
 		delete(*thread.available, link);
 });
 
-		write_message("Thread(%): executing work '%'\n", index, work.*);
-		ThreadProc(work);
-		write_message("Thread(%): work executed with message: '%'\n", index, builder_to_string(*thread.builder, do_reset=false));
+		inline ThreadProc(*work);
+		write_message("Thread(%): work '%' executed\n", index, work);
 
 PUSH_LOCK(*thread.completed_mutex, #code
 {
@@ -205,7 +203,7 @@ PUSH_LOCK(*thread.completed_mutex, #code
 
 shutdown :: inline ()
 {
-	write_message("Shutting down threads\n");
+	write_message("ThreadGroup: shutting down\n");
 
 	THREAD_GROUP.shutdown = true;
 	for *thread: THREAD_GROUP.threads
@@ -222,16 +220,16 @@ write_message :: inline (format: string, args: ..Any)
 	if THREAD_GROUP.logging
 	{
 		builder: String_Builder;
-		print_to_builder(*builder, format, args                ,, params=params(.Temp));
-		write_string(builder_to_string(*builder, do_reset=false,, params=params(.Temp)));
+		print_to_builder(*builder, format, ..args              ,, allocation=allocation(.Temp));
+		write_string(builder_to_string(*builder, do_reset=false,, allocation=allocation(.Temp)));
 	}
 } @PrintLike
 
 toggle_logging :: inline ()
 {
 	THREAD_GROUP.logging = !THREAD_GROUP.logging;
-	status := ifx THREAD_GROUP.logging "Enabling" else "Disabling";
-	write_message("% logging for ThreadGroup", status);
+	status := ifx THREAD_GROUP.logging "enabling" else "disabling";
+	write_message("ThreadGroup: % logging\n", status);
 }
 
 }

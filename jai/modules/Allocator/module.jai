@@ -45,18 +45,18 @@ MemoryArena :: struct
 	used: s64;
 }
 
+Allocation :: struct
+{
+	arena: ArenaType;
+	alignment: s64;
+}
+
 #scope_export
 
 ArenaAllocator :: struct
 {
 	main: MemoryArena;
 	temp: MemoryArena;
-}
-
-ArenaParams :: struct
-{
-	arena: ArenaType;
-	alignment: s64;
 }
 
 /////////////////////////////
@@ -89,7 +89,7 @@ operator == :: inline (lhs: MemoryArena, rhs: MemoryArena) -> bool
 // Context
 /////////////////////////////
 
-#add_context params: ArenaParams = .{.Main, 4};
+#add_context allocation: Allocation = .{.Main, 4};
 
 /////////////////////////////
 
@@ -98,16 +98,16 @@ operator == :: inline (lhs: MemoryArena, rhs: MemoryArena) -> bool
 // Macros
 /////////////////////////////
 
-PUSH_ALLOCATION_PARAMS :: (params: ArenaParams) #expand #no_debug
+PUSH_ALLOCATOR_PARAMS :: (allocation: Allocation) #expand #no_debug
 {
-	old_params := context.params;
-	context.params = params;
-	`defer context.params = old_params;
+	old_allocation := context.allocation;
+	context.allocation = allocation;
+	`defer context.allocation = old_allocation;
 }
 
-PUSH_ALLOCATION_PARAMS :: (params: ArenaParams, code: Code) #expand
+PUSH_ALLOCATOR_PARAMS :: (allocation: Allocation, code: Code) #expand
 {
-	PUSH_ALLOCATION_PARAMS(params);
+	PUSH_ALLOCATOR_PARAMS(allocation);
 	
 	#insert code;
 }
@@ -137,13 +137,13 @@ allocator_proc ::
 		case .ALLOCATE;
 		{
 			arena: *MemoryArena;
-            if context.params.arena ==
+            if context.allocation.arena ==
 			{
 				case .Temp; { arena = *allocator.temp; }
 				case .Main; { arena = *allocator.main; }
 			}
 
-			alignment := context.params.alignment;
+			alignment := context.allocation.alignment;
 			// NOTE: Makinkg sure alignment is a power of two
             assert((alignment & ~(alignment - 1)) == alignment);
 			assert(alignment <= 128);
@@ -157,7 +157,7 @@ allocator_proc ::
 		case .FREE;
 		{
 			arena: *MemoryArena;
-            if context.params.arena ==
+            if context.allocation.arena ==
 			{
 				case .Temp; { arena = *allocator.temp; }
 				case .Main; { arena = *allocator.main; }
@@ -194,9 +194,9 @@ allocator_proc ::
 	}
 }
 
-params :: inline (arena: ArenaType, alignment: s64 = 4) -> ArenaParams
+allocation :: inline (arena: ArenaType, alignment: s64 = 4) -> Allocation
 {
-	result: ArenaParams;
+	result: Allocation;
 	result.arena     = arena;
 	result.alignment = alignment;
 	

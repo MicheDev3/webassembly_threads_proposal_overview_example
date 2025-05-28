@@ -328,6 +328,8 @@ write_strings_unsynchronized :: (strings: ..string, to_standard_error := false) 
 
 write_string  :: (s: string, to_standard_error := false) #no_context #compiler
 {
+	one_time_init(*SYNC_INITTED, init_synchronization());
+
 	lock(*CONSOLE_LOCK);
 	defer unlock(*CONSOLE_LOCK);
 	
@@ -336,6 +338,8 @@ write_string  :: (s: string, to_standard_error := false) #no_context #compiler
 
 write_strings :: (strings: ..string, to_standard_error := false) #no_context #compiler
 {
+	one_time_init(*SYNC_INITTED, init_synchronization());
+
 	lock(*CONSOLE_LOCK);
 	defer unlock(*CONSOLE_LOCK);
 	
@@ -449,6 +453,16 @@ wasm_lock         :: (address: *s64)                                    #foreign
 wasm_unlock       :: (address: *s64)                                    #foreign;
 wasm_write_string :: (count: s64, data: *void, to_standard_error: bool) #foreign;
 
+one_time_init :: (synch_value: *s32, to_insert: Code) #expand 
+{
+    
+}
+
+init_synchronization :: () #no_context
+{
+
+}
+
 #scope_export
 
 debug_break :: () #no_context
@@ -537,7 +551,7 @@ Semaphore :: struct
 
 #scope_file
 
-kernel32     :: #library,system "kernel32";
+kernel32 :: #library,system "kernel32";
 
 InitializeCriticalSection :: (section: *Mutex)                                                                                           #foreign kernel32;
 WriteFile                 :: (handle: *void, buffer: *void, buffer_length: u32, written_result: *u32, overlapped: *void)        -> s32   #foreign kernel32;
@@ -584,8 +598,6 @@ MutexDebug :: struct
 
 STANDARD_OUTPUT: *void;
 STANDARD_ERROR:  *void;
-
-SYNC_INITTED: s32 = 0;
 
 one_time_init :: (synch_value: *s32, to_insert: Code) #expand 
 {
@@ -696,8 +708,6 @@ unlock :: inline (mutex: *Mutex) #no_context
 
 write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
 {
-	one_time_init(*SYNC_INITTED, init_synchronization());
-
 	written: u32;
     handle := ifx to_standard_error then STANDARD_ERROR else STANDARD_OUTPUT;
     status := WriteFile(handle, s.data, cast(u32) s.count, *written, null);
@@ -779,3 +789,4 @@ set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
 #scope_module
 
 CONSOLE_LOCK: Mutex;
+SYNC_INITTED: s32 = 0;

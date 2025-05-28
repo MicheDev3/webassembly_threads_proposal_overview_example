@@ -37,17 +37,24 @@ MemoryBlock :: struct
 
 
 /////////////////////////////
-// Functions
-/////////////////////////////
-
-/////////////////////////////
-
-
-/////////////////////////////
 // Foreigns
 /////////////////////////////
 
 carve_memory_block :: (memory_block_index: s64, memory_block_count: s64, worker_memory_size: s64, temp_memory_size: s64) -> MemoryBlock #foreign;
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Functions
+/////////////////////////////
+
+init_arena :: inline (arena: *ArenaAllocator, thread_count: s64)
+{
+	block := carve_memory_block(0, thread_count, WORKER_NR_OF_PAGES, TEMP_NR_OF_PAGES);
+	arena.main = .{block.main_base, block.main_size, 0};
+	arena.temp = .{block.temp_base, block.temp_size, 0};
+}
 
 /////////////////////////////
 
@@ -59,30 +66,22 @@ carve_memory_block :: (memory_block_index: s64, memory_block_count: s64, worker_
 #program_export
 init :: (thread_count: s64) #c_call
 {
-	ctx: #Context;
-    push_context,defer_pop ctx;
+    push_context,defer_pop CONTEXT;
     
     assert(INITTED == false);
     assert(thread_count > 0 && thread_count <= MAX_THREAD_COUNT);
 	
-	block := carve_memory_block(0, thread_count, WORKER_NR_OF_PAGES, TEMP_NR_OF_PAGES);
-	main_arena_allocator := *MAIN_ARENA_ALLOCATOR;
-	main_arena_allocator.main = .{block.main_base, block.main_size, 0};
-	main_arena_allocator.temp = .{block.temp_base, block.temp_size, 0};
+	init_arena(*MAIN_ARENA_ALLOCATOR, thread_count);
+	context.allocator.data = *MAIN_ARENA_ALLOCATOR;
 
 	for 1..thread_count-1
 	{
-		block := carve_memory_block(it, thread_count, WORKER_NR_OF_PAGES, TEMP_NR_OF_PAGES);
-		thread_arena_allocator := New(ArenaAllocator,, Allocator.{allocator_proc, main_arena_allocator});
-		thread_arena_allocator.main = .{block.main_base, block.main_size, 0};
-		thread_arena_allocator.temp = .{block.temp_base, block.temp_size, 0};
-	
-		init_thread(thread_arena_allocator);
+		thread_arena_allocator := New(ArenaAllocator);
+		init_arena(thread_arena_allocator, thread_count);
+		
+		init_thread(it, thread_arena_allocator);
 	}
 	
-	write_message("Initialised '%' threads", thread_count-1);
-	
-	CONTEXT.allocator.data = main_arena_allocator;
 	INITTED = true;
 }
 
@@ -121,6 +120,7 @@ main :: () #c_call
 #import "Threading"()(
 	Work             =Work,
 	MAX_THREAD_COUNT =MAX_THREAD_COUNT,
+	CACHE_LINE_SIZE  =CACHE_LINE_SIZE,
 	LOGGING          =true,
 	ThreadProc       =thread_proc,
 );

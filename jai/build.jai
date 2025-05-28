@@ -389,8 +389,11 @@ Platform :: enum
 Options :: struct
 {
 	optimise: bool;
+	
+	cache_line_size:  s64;
 	max_thread_count: s64;
 	
+	cache_line_size  = 64;
 	max_thread_count = 32;
 }
 
@@ -517,6 +520,7 @@ build_win64 :: (build_parent_options: Build_Options, options: Options, platform_
 	add_build_string(tprint("THREAD_MEMORY_SIZE :: %;", platform_options.thread_memory_size), w);
 	add_build_string(tprint("MAIN_MEMORY_SIZE :: %;", platform_options.main_memory_size), w);
 	add_build_string(tprint("TEMP_MEMORY_SIZE :: %;", platform_options.temp_memory_size), w);
+	add_build_string(tprint("CACHE_LINE_SIZE :: %;", options.cache_line_size), w);
 	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
 	
 	compiler_end_intercept(w);
@@ -606,6 +610,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	add_build_file("wasm_main.jai", w);
 	add_build_string(tprint("WORKER_NR_OF_PAGES :: %;", platfomr_options.worker_nr_pages), w);
 	add_build_string(tprint("TEMP_NR_OF_PAGES :: %;", platfomr_options.temp_nr_pages), w);
+	add_build_string(tprint("CACHE_LINE_SIZE :: %;", options.cache_line_size), w);
 	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
 	
 	while true
@@ -747,6 +752,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 		}
 	}
 	
+	_, project_folder := split_from_right(#filepath, "jai");
 	if #complete platform == 
 	{
 		case .None;
@@ -757,7 +763,6 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 		{
 			// TODO: At the moment the number of threads, for wasm, must be a power of two.
 			// If not unaligned memory access runtime errors will occurs, fix!
-			_, project_folder := split_from_right(#filepath, "jai");
 			w_options.js_\ output_path = sprint("%js/",     project_folder);
 			w_options.wat_\output_path = sprint("%wat/",    project_folder);
 			w_options.wasm_output_path = sprint("%public/", project_folder);

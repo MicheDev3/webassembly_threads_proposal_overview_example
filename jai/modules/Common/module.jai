@@ -6,42 +6,42 @@
 Block :: struct ($T: Type)
 {
 	count: s64;
-    entries: *T;
+	entries: *T;
 }
 
 Array :: struct ($T: Type, $S: int = 0)
 {
-    stored:  s64;
-    entries: [S]T;
+	stored:  s64;
+	entries: [S]T;
 }
 
 ListLink :: struct ($T: Type, DOUBLE_LINK: bool)
 {
-#if type_info(T).type == 
+#if type_info(T).type ==
 {
-case .STRUCT; using value: T;
-case;               value: T;
+	case .STRUCT; using value: T;
+	case;               value: T;
 }
-    next: *ListLink(T, DOUBLE_LINK);
+	next: *ListLink(T, DOUBLE_LINK);
 #if DOUBLE_LINK
 {
-    prev: *ListLink(T, DOUBLE_LINK);
+	prev: *ListLink(T, DOUBLE_LINK);
 }
-
+	
 }
 
 LinkedList :: struct ($T: Type, DOUBLE_LINK: bool = false)
 {
-    count: s64;
-    sentinel: *ListLink(T, DOUBLE_LINK);
+	count: s64;
+	sentinel: *ListLink(T, DOUBLE_LINK);
 }
 
 FreeLinkedList :: struct ($T: Type, DOUBLE_LINK: bool = false)
 {
 	Link :: ListLink(T, DOUBLE_LINK);
-
-    used: LinkedList(T, DOUBLE_LINK);
-    free: LinkedList(T, DOUBLE_LINK);
+	
+	used: LinkedList(T, DOUBLE_LINK);
+	free: LinkedList(T, DOUBLE_LINK);
 }
 
 /////////////////////////////
@@ -55,18 +55,18 @@ operator *[] :: inline (block: *$B/Block, index: s64) -> *block.T
 {
 	assert(index < block.count);
 	
-    result := *(block.entries[index]);
-
-    return result;
+	result := *(block.entries[index]);
+	
+	return result;
 }
 
 operator *[] :: inline (array: *$A/Array, index: s64) -> *array.T
 {
 	assert(index < array.stored);
 	
-    result := *(array.entries[index]);
-
-    return result;
+	result := *(array.entries[index]);
+	
+	return result;
 }
 
 /////////////////////////////
@@ -78,92 +78,92 @@ operator *[] :: inline (array: *$A/Array, index: s64) -> *array.T
 
 for_expansion :: (block: *$B/Block, body: Code, flags: For_Flags) #expand
 {
-POINTER :: cast(bool) (flags & .POINTER);
-REVERSE :: cast(bool) (flags & .REVERSE);
-
-// TODO: For now REVERSE is not supported
-#assert(REVERSE == false);
-
-    for slot_index: 0..block.count-1
-    {
-        `it_index := slot_index;
+	POINTER :: cast(bool) (flags & .POINTER);
+	REVERSE :: cast(bool) (flags & .REVERSE);
+	
+	// TODO: For now REVERSE is not supported
+	#assert(REVERSE == false);
+	
+	for slot_index: 0..block.count-1
+	{
+		`it_index := slot_index;
 #if POINTER
 {
-        `it := *(block.*[slot_index]);
+		`it := *(block.*[slot_index]);
 }
 else
 {
-        `it := block.*[slot_index];
-}    
-        #insert body;
-    }
+		`it := block.*[slot_index];
+}
+		#insert body;
+	}
 }
 
 for_expansion :: (array: *$A/Array, body: Code, flags: For_Flags) #expand
 {
-
-POINTER :: cast(bool) (flags & .POINTER);
-REVERSE :: cast(bool) (flags & .REVERSE);
-
-// TODO: For now REVERSE is not supported
-#assert(REVERSE == false);
-
-    for slot_index: 0..array.stored-1
-    {
-        `it_index := slot_index;
+	
+	POINTER :: cast(bool) (flags & .POINTER);
+	REVERSE :: cast(bool) (flags & .REVERSE);
+	
+	// TODO: For now REVERSE is not supported
+	#assert(REVERSE == false);
+	
+	for slot_index: 0..array.stored-1
+	{
+		`it_index := slot_index;
 #if POINTER
 {
-        `it := *(array.*[slot_index]);
+		`it := *(array.*[slot_index]);
 }
 else
 {
-        `it := array.*[slot_index];
-}    
-    
-        #insert body;
-    }
+		`it := array.*[slot_index];
+}
+		
+		#insert body;
+	}
 }
 
 for_expansion :: (list: *$L/LinkedList, body: Code, flags: For_Flags) #expand
 {
-POINTER :: cast(bool) (flags & .POINTER);
-REVERSE :: cast(bool) (flags & .REVERSE);
-
-// TODO: Does it really make sense to assert POINTER == true?
-#assert(POINTER == true);
-
+	POINTER :: cast(bool) (flags & .POINTER);
+	REVERSE :: cast(bool) (flags & .REVERSE);
+	
+	// TODO: Does it really make sense to assert POINTER == true?
+	#assert(POINTER == true);
+	
 #if REVERSE
 {
 	#assert list.DOUBLE_LINK "RESERVE is only supported for doubly linked list";
-
-    index := list.count-1;
-    link := list.sentinel.prev;
+	
+	index := list.count-1;
+	link := list.sentinel.prev;
 }
 else
 {
-    index: s64;
-    link := list.sentinel.next;
+	index: s64;
+	link := list.sentinel.next;
 }
-
-    while link != list.sentinel
-    {
-        `it_index := index;
-        `it := *link.value; 
-        
-        #insert body;
-
+	
+	while link != list.sentinel
+	{
+		`it_index := index;
+		`it := *link.value;
+		
+		#insert body;
+		
 #if REVERSE
 {
-        index -= 1;
-        link = link.prev;
+		index -= 1;
+		link = link.prev;
 }
 else
 {
-        index += 1;
-        link = link.next;
+		index += 1;
+		link = link.next;
 }
-
-    }
+		
+	}
 }
 
 ALLOCATE :: () #expand
@@ -173,22 +173,22 @@ ALLOCATE :: () #expand
 
 FREE :: (arena: ArenaType) #expand
 {
-	PUSH_ALLOCATION_PARAMS(params(arena));
-
-    context.allocator.proc(.FREE, 0, 0, null, context.allocator.data);
+	PUSH_ALLOCATOR_PARAMS(allocation(arena));
+	
+	context.allocator.proc(.FREE, 0, 0, null, context.allocator.data);
 }
 
 SHUTDOWN :: () #expand
 {
-    context.allocator.proc(.SHUTDOWN, 0, 0, null, context.allocator.data);
+	context.allocator.proc(.SHUTDOWN, 0, 0, null, context.allocator.data);
 }
 
 PUSH_ALLOCATOR :: (allocator: Allocator) #expand #no_debug
 {
-    old_allocator := context.allocator;
-
-    context.allocator = allocator;
-    `defer context.allocator = old_allocator;
+	old_allocator := context.allocator;
+	
+	context.allocator = allocator;
+	`defer context.allocator = old_allocator;
 }
 
 PUSH_LOCK :: (mutex: *Mutex) #expand
@@ -217,8 +217,8 @@ PUSH_LOCK :: (mutex: *Mutex, code: Code) #expand
 
 reserve :: inline (block: *$B/Block, count: s64)
 {
-    block.count = count;
-    block.entries = ALLOCATE(size_of(block.T)*block.count);
+	block.count = count;
+	block.entries = ALLOCATE(size_of(block.T)*block.count);
 }
 
 //
@@ -227,13 +227,13 @@ reserve :: inline (block: *$B/Block, count: s64)
 
 insert :: inline (array: *$A/Array) -> *array.T
 {
-	index := array.stored; 
-    array.stored += 1;
-
+	index := array.stored;
+	array.stored += 1;
+	
 	assert(array.stored <= array.entries.count);
-    
-    result := *(array.*[index]);
-    return result;
+	
+	result := *(array.*[index]);
+	return result;
 }
 
 //
@@ -252,65 +252,77 @@ make_list :: inline ($T: Type, $DOUBLE_LINK: bool) -> LinkedList(T, DOUBLE_LINK)
 
 insert :: inline
 (
-    list: *$L/LinkedList,
-    link: *ListLink(list.T, list.DOUBLE_LINK)
+	list: *$L/LinkedList,
+	link: *ListLink(list.T, list.DOUBLE_LINK)
 )
-{    
-    link.next = list.sentinel.next;
-    list.sentinel.next = link;
-
-    list.count += 1;
-}
-
-insert :: inline
-(
-    list: *$L/LinkedList,
-    value: list.T
-) -> *ListLink(list.T, list.DOUBLE_LINK)
-{
-    result := NEW(ListLink(list.T, list.DOUBLE_LINK));
-    result.value = value;
-
-    insert(list, result);
-    
-    return result;
-}
-
-head :: inline 
-(
-    list: *$L/LinkedList
-) -> *ListLink(list.T, list.DOUBLE_LINK)
-{
-    result := list.sentinel.next;
-    if result == list.sentinel
-    {
-        result = null;
-    }
-    
-    return result;
-}
-
-last :: inline 
-(
-    list: *$L/LinkedList
-) -> *ListLink(list.T, list.DOUBLE_LINK)
 {
 
 #if list.DOUBLE_LINK
 {
+	link.next = list.sentinel.next;
+	link.prev = list.sentinel;
+	
+	link.next.prev = link;
+	link.prev.next = link;
+}
+else
+{
+	link.next = list.sentinel.next;
+	list.sentinel.next = link;
+}
+	
+	list.count += 1;
+}
+
+insert :: inline
+(
+	list: *$L/LinkedList,
+	value: list.T
+) -> *ListLink(list.T, list.DOUBLE_LINK)
+{
+	result := New(ListLink(list.T, list.DOUBLE_LINK));
+	result.value = value;
+	
+	insert(list, result);
+	
+	return result;
+}
+
+head :: inline
+(
+	list: *$L/LinkedList
+) -> *ListLink(list.T, list.DOUBLE_LINK)
+{
+	result := list.sentinel.next;
+	if result == list.sentinel
+	{
+		result = null;
+	}
+	
+	return result;
+}
+
+last :: inline
+(
+	list: *$L/LinkedList
+) -> *ListLink(list.T, list.DOUBLE_LINK)
+{
+	
+#if list.DOUBLE_LINK
+{
 	result := list.sentinel.prev;
-    if result == list.sentinel
-    {
-        result = null;
-    }
+	if result == list.sentinel
+	{
+		result = null;
+	}
 }
 else
 {
 	// TODO: Implement this
 	#assert false "To be implemented";
 }
-    
-    return result;
+	
+	return result;
 }
 
 //
@@ -328,8 +340,8 @@ make_free_list :: inline ($T: Type, $DOUBLE_LINK: bool) -> FreeLinkedList(T, DOU
 
 insert :: inline
 (
-    list: *$L/FreeLinkedList,
-    link: *list.Link
+	list: *$L/FreeLinkedList,
+	link: *list.Link
 )
 {
 	insert(*list.used, link);
@@ -337,8 +349,8 @@ insert :: inline
 
 insert :: inline
 (
-    list: *$L/FreeLinkedList,
-    value: list.T
+	list: *$L/FreeLinkedList,
+	value: list.T
 ) -> *list.Link
 {
 	// TODO: Reuse value from free
@@ -347,9 +359,9 @@ insert :: inline
 	return result;
 }
 
-head :: inline 
+head :: inline
 (
-    list: *$L/FreeLinkedList
+	list: *$L/FreeLinkedList
 ) -> *list.Link
 {
 	result := head(*list.used);
@@ -357,9 +369,9 @@ head :: inline
 	return result;
 }
 
-last :: inline 
+last :: inline
 (
-    list: *$L/FreeLinkedList
+	list: *$L/FreeLinkedList
 ) -> *list.Link
 {
 	result := last(*list.used);
@@ -369,28 +381,28 @@ last :: inline
 
 delete :: inline
 (
-    list: *$L/FreeLinkedList,
-    link: *list.Link
+	list: *$L/FreeLinkedList,
+	link: *list.Link
 )
 {
-
+	
 #if list.DOUBLE_LINK
 {
-
+	
 }
 else
 {
 	// TODO: Implement this
 	#assert false "To be implemented";
 }
-
+	
 }
 
 delete :: inline
 (
-    list: *$L/FreeLinkedList,
-    first: *list.Link,
-    last:  *list.Link
+	list: *$L/FreeLinkedList,
+	first: *list.Link,
+	last:  *list.Link
 )
 {
 	last.next = list.free.sentinel.next;
