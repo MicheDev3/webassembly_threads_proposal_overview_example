@@ -29,37 +29,74 @@ THREAD_GROUP: ThreadGroup;
 // Structs
 /////////////////////////////
 
+#scope_file
+
+Thread :: AlignToCacheLine(struct
+{		
+	index: s64;
+	
+	allocator: Allocator;
+
+	semaphore: Semaphore;
+	
+	available_mutex: Mutex;
+	completed_mutex: Mutex;
+	// TODO: Think if this might be needed (one reason might be, since
+	// jai does not have compiler barrier llvm might rearange the 
+	// instructions order in optimise build) :SHUTDOWN_MUTEX
+	// shutdown_\mutex: Mutex;
+	
+	available: WorkList;
+	completed: WorkList;
+	
+	running: bool;
+	
+	// TODO: Have some kind of debug info
+});
+
+#scope_export
+
+AlignToCacheLine :: struct (T: Type)
+#modify 
+{
+    tis := cast(*Type_Info)T;
+    return tis.type == .STRUCT, "Argument must be a struct.";
+} {
+    #insert -> string 
+    {
+        builder: String_Builder;
+        info := type_info(T);
+
+		print_to_builder(*builder, "	Base :: struct\n");
+		print_to_builder(*builder, "	{\n");
+        for * info.members 
+        {
+            print_to_builder(*builder, "        %: type_of(T.%);\n", it.name, it.name);  // Use type_of so we don't need to reference the string name of the type.
+        }
+		print_to_builder(*builder, "	}\n");
+        
+		print_to_builder(*builder, #string DONE
+	DESIRED_SIZE :: #run align_forward(size_of(Base), %);
+	
+	using base: Base;
+#place base;
+	_: [DESIRED_SIZE] u8 = ---;
+DONE, CACHE_LINE_SIZE
+		);
+		
+		result := builder_to_string(*builder,, temp);
+        return result;
+    }
+}
+
 ThreadGroup :: struct
 {
-    Thread :: struct 
-    {
-		Base :: struct
-		{
-			WorkList :: FreeLinkedList(Work, DOUBLE_LINK=true);
-			
-			index: s64;
-
-			allocator: Allocator;
-		
-			semaphore: Semaphore;
-			
-			available_mutex: Mutex;
-			completed_mutex: Mutex;
-			
-			available: WorkList;
-			completed: WorkList;
-		}
-	
-        DESIRED_SIZE :: #run align_forward(size_of(Base), CACHE_LINE_SIZE);
-
-        using base: Base;
-#place base;
-        _: [DESIRED_SIZE] u8 = ---;
-    }
-
 	threads: Array(Thread, MAX_THREAD_COUNT-1);
 	
+	entropy: Random_State;
+
 	shutdown: bool;
+	initted:  bool;
 
 #if LOGGING
 {
@@ -72,16 +109,43 @@ ThreadGroup :: struct
 
 
 /////////////////////////////
+// Types
+/////////////////////////////
+
+#scope_file
+
+WorkList :: FreeLinkedList(Work, DOUBLE_LINK=true);
+
+#scope_export
+
+/////////////////////////////
+
+
+/////////////////////////////
 // Functions
 /////////////////////////////
 
+init_thread_group :: inline (enable_logging: bool, seed: u64)
+{
+	random_seed(*THREAD_GROUP.entropy, seed);
+#if LOGGING
+{
+	if enable_logging { toggle_logging(); }
+}
+	THREAD_GROUP.initted = true;
+}
+
 init_thread :: inline (index: s64, arena: *ArenaAllocator)
 {
+	assert(THREAD_GROUP.initted);
+
 	thread := insert(*THREAD_GROUP.threads);
 	thread.index = index;
 	start(*thread.semaphore);
 	start(*thread.available_mutex);
 	start(*thread.completed_mutex);
+	// TODO: :SHUTDOWN_MUTEX
+	// start(*thread.shutdown_\mutex);
 	thread.allocator = .{allocator_proc, arena};
 	thread.available = make_free_list(Work, DOUBLE_LINK=true,, thread.allocator);
 	thread.completed = make_free_list(Work, DOUBLE_LINK=true,, thread.allocator);	
@@ -89,8 +153,11 @@ init_thread :: inline (index: s64, arena: *ArenaAllocator)
 
 add_work :: inline (work: Work)
 {
-	random1 := cast(u32)random_get_within_range(0, cast(float)THREAD_GROUP.threads.stored);
-	random2 := cast(u32)random_get_within_range(0, cast(float)THREAD_GROUP.threads.stored);
+	assert(THREAD_GROUP.initted);
+	assert(!THREAD_GROUP.shutdown);
+
+	random1 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)THREAD_GROUP.threads.stored);
+	random2 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)THREAD_GROUP.threads.stored);
 	
 	thread1 := *THREAD_GROUP.threads[random1];
 	thread2 := *THREAD_GROUP.threads[random2];
@@ -106,17 +173,39 @@ PUSH_LOCK(*thread.available_mutex, #code
 	insert(*thread.available, work, ,, thread.allocator);
 });
 
-	write_message("Thread(%): work added\n", thread.index);
+	write_message("ThreadGroup: '%' added to Thread(%)\n", work, thread.index);
 
 	wake(*thread.semaphore);
 }
 
 run_thread :: inline (index: s64)
 {
+	assert(THREAD_GROUP.initted);
+
 	thread := *THREAD_GROUP.threads[index];
+	thread.running = true;
 	PUSH_ALLOCATOR(thread.allocator);
-	
 	write_message("Thread(%): starting\n", index);
+
+	defer
+	{
+
+	// TODO: :SHUTDOWN_MUTEX
+// PUSH_LOCK(*thread.shutdown_\mutex, #code
+// {
+		
+		close(*thread.semaphore);
+		close(*thread.available_mutex);
+		close(*thread.completed_mutex);
+
+		write_message("Thread(%): terminated\n", index);
+			
+		SHUTDOWN();
+
+		thread.running = false;
+// });
+
+	}
 
 	while !THREAD_GROUP.shutdown
 	{
@@ -124,7 +213,7 @@ run_thread :: inline (index: s64)
 		if THREAD_GROUP.shutdown { break; }
 		
 		work: Work = ---;
-		link: *thread.WorkList.Link;
+		link: *WorkList.Link;
 PUSH_LOCK(*thread.available_mutex, #code
 {
 		link = last(*thread.available);
@@ -144,47 +233,37 @@ PUSH_LOCK(*thread.completed_mutex, #code
 		
 		FREE(.Temp);
 	}
-	
-	write_message("Thread(%): terminating\n", index);
-	
-	close(*thread.semaphore);
-	close(*thread.available_mutex);
-	close(*thread.completed_mutex);
-	
-	SHUTDOWN();
 }
 
 get_completed_work :: () -> LinkedList(Block(Work))
 {
-	PUSH_ALLOCATION_PARAMS(params(.Temp));
+	assert(THREAD_GROUP.initted);
 
-	result: LinkedList(Block(Work));
-	init(*result);
+	PUSH_ALLOCATOR_PARAMS(allocation(.Temp));
 
+	result := make_list(Block(Work), DOUBLE_LINK=false);
 	for *thread: THREAD_GROUP.threads
 	{
-
+		size: s64;
+		first: *WorkList.Link;
 PUSH_LOCK(*thread.completed_mutex, #code
 {
-		count := count(*thread.completed);
-		first := head (*thread.completed);
+		size  = count(*thread.completed);
+		first = head (*thread.completed);
 		reset(*thread.completed);
 });
 		
-		block := insert(*result, Block.{});
-		if count
+		block := insert(*result, .{});
+		if size
 		{
-			reserve(block, count);
+			reserve(*block.value, size);
 			
+			index := 0;
 			last := first;
-			while true
+			for 0..size-1
 			{
-				block[it_index] = last.value;
-				
-				if last.next == sentinel(*thread.completed)
-				{
-					break;
-				}
+				assert(last != sentinel(*thread.completed));
+				block.value[it] = last.value;
 				
 				last = last.next;
 			}
@@ -193,23 +272,48 @@ PUSH_LOCK(*thread.completed_mutex, #code
 {
 			delete(*thread.completed, first, last);
 });
-
 		}
-		
 	}
 	
 	return result;
 }
 
-shutdown :: inline ()
+shutdown :: inline (wait_for_termination: bool = true)
 {
+	assert(THREAD_GROUP.initted);
+	assert(!THREAD_GROUP.shutdown);
+
+	THREAD_GROUP.initted = false;
+	THREAD_GROUP.shutdown = true;
 	write_message("ThreadGroup: shutting down\n");
 
-	THREAD_GROUP.shutdown = true;
 	for *thread: THREAD_GROUP.threads
 	{
 		wake(*thread.semaphore);
 	}
+	
+	while wait_for_termination
+	{
+		terminated := true;
+		for *thread: THREAD_GROUP.threads
+		{
+			// TODO: :SHUTDOWN_MUTEX
+// PUSH_LOCK(*thread.shutdown_\mutex, #code
+// {
+			terminated &= !thread.running;
+// });
+		}
+		
+		if terminated
+		{
+			// TODO: :SHUTDOWN_MUTEX
+			// for *thread: THREAD_GROUP.threads
+			// {
+			// 	close(*thread.shutdown_\mutex);
+			// }
+			break;
+		}
+	}	
 }
 
 #if LOGGING

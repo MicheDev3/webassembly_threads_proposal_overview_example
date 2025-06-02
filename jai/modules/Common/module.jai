@@ -166,9 +166,11 @@ else
 	}
 }
 
-ALLOCATE :: () #expand
+ALLOCATE :: (size: s64) -> *void #expand
 {
-	context.allocator.proc(.ALLOCATE, 0, 0, null, context.allocator.data);
+	result := context.allocator.proc(.ALLOCATE, size, 0, null, context.allocator.data);
+
+	return result;
 }
 
 FREE :: (arena: ArenaType) #expand
@@ -408,7 +410,8 @@ delete :: inline
 	last.next = list.free.sentinel.next;
 	list.free.sentinel.next = first;
 	
-	return result;
+	list.used.count -= 1;
+	list.free.count += 1;
 }
 
 reset :: inline (list: *$L/FreeLinkedList)

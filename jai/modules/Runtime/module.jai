@@ -6,12 +6,9 @@
 
 #module_parameters(DEFINE_SYSTEM_ENTRY_POINT: bool, DEFINE_INITIALIZATION: bool, ENABLE_BACKTRACE_ON_CRASH: bool);
 
-#scope_export
-
-// TODO: Support other OSes
-
 // NOTE: Required to build for unix oses.
 OS_IS_UNIX :: OS == .MACOS || OS == .LINUX || OS == .PS5 || OS == .IOS || OS == .ANDROID;
+
 
 // @Cleanup: __element_duplicate should lose its c_call status, and also be faster...!
 __element_duplicate :: (start: *u8, num_elements: s64, size: s64) #c_call #no_aoc
@@ -346,34 +343,68 @@ write_strings :: (strings: ..string, to_standard_error := false) #no_context #co
 	write_strings_unsynchronized(..strings, to_standard_error);
 }
 
-#scope_module;
-
-write_loc :: (loc: Source_Code_Location, to_standard_error := false) #no_context
+// @Volatile: Context_Base must match internal compiler settings in general.h
+// It must exist and be relatively easy to compile (without requiring #run of
+// procedures, for example). Context_Base is going to be annoying to edit because
+// if you make an error of some kind, even a simple one like an undeclared identifier,
+// you won't get a helpful error message.
+Context_Base :: struct 
 {
-	write_strings_unsynchronized(loc.fully_pathed_filename, ":", to_standard_error = to_standard_error);
-	write_string_unsynchronized(write_number(loc.line_number), to_standard_error);
-	write_string_unsynchronized(",", to_standard_error);
-	write_string_unsynchronized(write_number(loc.character_number), to_standard_error);
-}
-
-my_panic :: () #no_context
-{
-	write_string_unsynchronized("Panic.\n", to_standard_error = true);
-	debug_break();
-}
-
-__panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, filename: *u8) #no_context
-{
-	lock(*CONSOLE_LOCK);
-	defer unlock(*CONSOLE_LOCK);
-
-	write_string_unsynchronized("Error: Attempt to call a compile-time procedure at runtime. The location of the call was: ", to_standard_error = true);
-	write_string_unsynchronized(to_string(filename), to_standard_error = true);
-	write_string_unsynchronized(":", to_standard_error = true);
-	write_string_unsynchronized(write_number(line_number), to_standard_error = true);
-	write_string_unsynchronized(".\n", to_standard_error = true);
+	context_info:  *Type_Info_Struct; // Allow libs or DLLs to see what context we are passing them. Will always be initialized to type_of(Context).
 	
-	my_panic();
+	thread_index   : u32;
+	
+	allocator      := default_allocator;
+	
+	logger         := runtime_support_default_logger;
+	logger_data    :  *void;
+	log_source_identifier: u64;      // Arbitrary identifier; settable by the main program.
+	log_level      :  Log_Level;     // Settable by the main program to inform anyone who logs.
+	
+	temporary_storage: *Temporary_Storage;
+	
+	// Currently, for simplicity we don't #if this out right now when _STACK_TRACE is false
+	// (but may later). It is probably convenient to let runtime code be able
+	// to check context.stack_trace to see if it is null in some cases,
+	// rather than needing all that to be #iffed as well. We will see.
+	stack_trace: *Stack_Trace_Node;
+	
+	assertion_failed := runtime_support_assertion_failed;
+	handling_assertion_failure := false;  // Used to avoid assert() infinite loops. Do not mess with this value.
+	
+	default_allocator :: Allocator.{runtime_support_default_allocator_proc, null};
+}
+
+Temporary_Storage :: struct // @Volatile: Must match general.h
+{
+	data:     *u8;
+	size:     s64;
+	current_page_bytes_occupied: s64;
+	total_bytes_occupied: s64;
+	high_water_mark: s64;
+	last_set_mark_location: Source_Code_Location;
+	
+	overflow_allocator : Allocator;
+	
+	overflow_pages: *Overflow_Page;
+	original_data: *u8;  // Data to restore after clearing overflow pages. @Simplify: Maybe could be an Overflow_Page, but maybe we want to be able to assert on overflow_pages==null to ensure performance.
+	original_size: s64;
+	
+	Overflow_Page :: struct
+	{
+		next: *Overflow_Page;
+		allocator: Allocator;
+		size: s64;
+	}
+}
+
+set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
+{
+	ts.data = data;
+	ts.size = count;
+	
+	ts.original_data = data;
+	ts.original_size = count;
 }
 
 #if DEFINE_INITIALIZATION 
@@ -405,8 +436,6 @@ __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, file
 	}
 }
 
-#scope_module
-
 #if DEFINE_SYSTEM_ENTRY_POINT
 {
 	#program_export "main"
@@ -424,13 +453,230 @@ __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, file
 	}
 }
 
+#scope_module
+
 Default_Allocator :: #import "Default_Allocator";
 
 runtime_support_default_allocator_proc :: Default_Allocator.allocator_proc;
 
+write_loc :: (loc: Source_Code_Location, to_standard_error := false) #no_context
+{
+	write_strings_unsynchronized(loc.fully_pathed_filename, ":", to_standard_error = to_standard_error);
+	write_string_unsynchronized(write_number(loc.line_number), to_standard_error);
+	write_string_unsynchronized(",", to_standard_error);
+	write_string_unsynchronized(write_number(loc.character_number), to_standard_error);
+}
+
+my_panic :: () #no_context
+{
+	write_string_unsynchronized("Panic.\n", to_standard_error = true);
+	debug_break();
+}
+
+__panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, filename: *u8) #no_context
+{
+	lock(*CONSOLE_LOCK);
+	defer unlock(*CONSOLE_LOCK);
+
+	write_string_unsynchronized("Error: Attempt to call a compile-time procedure at runtime. The location of the call was: ", to_standard_error = true);
+	write_string_unsynchronized(to_string(filename), to_standard_error = true);
+	write_string_unsynchronized(":", to_standard_error = true);
+	write_string_unsynchronized(write_number(line_number), to_standard_error = true);
+	write_string_unsynchronized(".\n", to_standard_error = true);
+	
+	my_panic();
+}
+
+#scope_file
+
+CONSOLE_LOCK: Mutex;
+SYNC_INITTED: s32 = 0;
+
 #scope_export
 
-#if OS == .WASM
+#if OS == .WINDOWS
+{
+
+// TODO: Use a ticket mutex
+Mutex :: struct 
+{
+    DebugInfo:      *MutexDebug;
+    LockCount:      u32;
+    RecursionCount: u32;
+    OwningThread:   *void; // from the thread's ClientId->UniqueThread
+    LockSemaphore:  *void;
+    SpinCount:      u64;   // force size on 64-bit systems when packed
+}
+
+Semaphore :: struct
+{
+	value: *void;
+}
+
+debug_break :: () #no_context
+{
+	if #compile_time
+	{
+		compile_time_debug_break :: () #compiler #no_context;
+		compile_time_debug_break();
+	}
+	else
+	{
+		// TODO: Only supporting x64 for simplicity
+		#asm { int3; }
+	}
+}
+
+sleep :: inline (ms: s64) #no_context
+{
+	Sleep(cast(s32)ms);
+}
+
+start :: (semaphore: *Semaphore, value: s32 = 0) #no_context
+{
+	MAXIMUM :s32: 0x7fff_ffff;
+	semaphore.value = CreateSemaphoreW(null, value, MAXIMUM, null);
+}
+
+close :: (semaphore: *Semaphore) #no_context
+{
+	CloseHandle(semaphore.value);
+}
+
+wake :: inline (semaphore: *Semaphore) #no_context
+{
+	ReleaseSemaphore(semaphore.value, 1, null);
+}
+
+wait :: inline (semaphore: *Semaphore) #no_context
+{
+	INFINITE :u32 : 0xffff_ffff;
+	WaitForSingleObject(semaphore.value, INFINITE);
+}
+
+start :: (mutex: *Mutex) #no_context
+{
+	InitializeCriticalSection(mutex);
+}
+
+close :: (mutex: *Mutex) #no_context
+{
+
+}
+
+lock :: inline (mutex: *Mutex) #no_context
+{
+	EnterCriticalSection(mutex);
+}
+
+unlock :: inline (mutex: *Mutex) #no_context
+{
+	LeaveCriticalSection(mutex);
+}
+
+write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
+{
+	written: u32;
+    handle := ifx to_standard_error then STANDARD_ERROR else STANDARD_OUTPUT;
+    status := WriteFile(handle, s.data, cast(u32) s.count, *written, null);
+}
+
+#scope_file
+
+STANDARD_OUTPUT: *void;
+STANDARD_ERROR:  *void;
+
+kernel32 :: #library,system "kernel32";
+
+BOOL :: enum s32
+{
+    FALSE :: 0;
+    TRUE  :: 1;
+}
+
+SecurityAttributes :: struct 
+{
+    nLength: u32;
+    lpSecurityDescriptor: *void;
+    bInheritHandle: BOOL;
+}
+
+ListEntry :: struct
+{
+   Flink: *ListEntry;
+   Blink: *ListEntry;
+}
+
+MutexDebug :: struct 
+{
+    Type:                      u16;
+    CreatorBackTraceIndex:     u16;
+    CriticalSection:           *Mutex;
+    ProcessLocksList:          ListEntry;
+    EntryCount:                u32;
+    ContentionCount:           u32;
+    Flags:                     u32;
+    CreatorBackTraceIndexHigh: u16;
+    SpareWORD:                 u16;
+}
+
+InitializeCriticalSection :: (section: *Mutex)                                                                                           #foreign kernel32;
+WriteFile                 :: (handle: *void, buffer: *void, buffer_length: u32, written_result: *u32, overlapped: *void)        -> s32   #foreign kernel32;
+GetStdHandle              :: (handle: s32)                                                                                      -> *void #foreign kernel32;
+Sleep                     :: (milliseconds: s32)                                                                                -> void  #foreign kernel32;
+EnterCriticalSection      :: (lpCriticalSection: *Mutex)                                                                                 #foreign kernel32;
+LeaveCriticalSection      :: (lpCriticalSection: *Mutex)                                                                                 #foreign kernel32;
+CreateSemaphoreW          :: (lpSemaphoreAttributes: *SecurityAttributes, lInitialCount: s32, lMaximumCount: s32, lpName: *u16) -> *void #foreign kernel32;
+ReleaseSemaphore          :: (hSemaphore: *void, lReleaseCount: s32, lpPreviousCount: *s32)                                     -> BOOL  #foreign kernel32;
+CloseHandle               :: (handle: *void)                                                                                    -> s32   #foreign kernel32;
+WaitForSingleObject       :: (handle: *void, milliseconds: u32)                                                                 -> u32   #foreign kernel32;
+
+one_time_init :: (synch_value: *s32, to_insert: Code) #expand 
+{
+    // A routine to run the code in 'to_insert' only once, even if
+    // there are multiple threads. synch_value.* should be 0 at startup.
+
+    // The values of synch_value.*:
+    // 0 = uninitialized, 1 = in progress init, 2 = initialized.
+
+    // Courtesy of Jeff Roberts.
+
+    while 1 
+    {
+        // @Warning: Apparently this read may not work on ARM, we need to look into it.
+        // The goal here is just to avoid the overhead of spamming the compare_and_swap.
+        if synch_value.* == 2  break;
+
+        success, old := compare_and_swap(synch_value, 0, 1);
+        if old == 
+        {
+            case 0;
+            {
+                #insert to_insert;
+            
+                if !compare_and_swap(synch_value, 1, 2) debug_break();  // Should not happen!
+            }
+            case 1;
+            {
+                for 1..4 #asm { pause; pause; pause; pause; pause; }
+            }
+            case 2; {}
+        }
+    }
+}
+
+init_synchronization :: () #no_context
+{
+    InitializeCriticalSection(*CONSOLE_LOCK);
+    
+    STD_OUTPUT_HANDLE :: -11;
+    STD_ERROR_HANDLE  :: -12;
+    STANDARD_OUTPUT = GetStdHandle(STD_OUTPUT_HANDLE);
+    STANDARD_ERROR  = GetStdHandle(STD_ERROR_HANDLE);
+}
+
+}
+else #if OS == .WASM
 {
 
 Mutex :: struct
@@ -531,262 +777,11 @@ write_string_unsynchronized :: (s: string, to_standard_error := false) #no_conte
 }
 
 }
-else #if OS == .WINDOWS
+else #if OS_IS_UNIX
 {
-
-Mutex :: struct 
-{
-    DebugInfo:      *MutexDebug;
-    LockCount:      u32;
-    RecursionCount: u32;
-    OwningThread:   *void; // from the thread's ClientId->UniqueThread
-    LockSemaphore:  *void;
-    SpinCount:      u64;   // force size on 64-bit systems when packed
-}
-
-Semaphore :: struct
-{
-	value: *void;
-}
-
-#scope_file
-
-kernel32 :: #library,system "kernel32";
-
-InitializeCriticalSection :: (section: *Mutex)                                                                                           #foreign kernel32;
-WriteFile                 :: (handle: *void, buffer: *void, buffer_length: u32, written_result: *u32, overlapped: *void)        -> s32   #foreign kernel32;
-GetStdHandle              :: (handle: s32)                                                                                      -> *void #foreign kernel32;
-Sleep                     :: (milliseconds: s32)                                                                                -> void  #foreign kernel32;
-EnterCriticalSection      :: (lpCriticalSection: *Mutex)                                                                                 #foreign kernel32;
-LeaveCriticalSection      :: (lpCriticalSection: *Mutex)                                                                                 #foreign kernel32;
-CreateSemaphoreW          :: (lpSemaphoreAttributes: *SecurityAttributes, lInitialCount: s32, lMaximumCount: s32, lpName: *u16) -> *void #foreign kernel32;
-ReleaseSemaphore          :: (hSemaphore: *void, lReleaseCount: s32, lpPreviousCount: *s32)                                     -> BOOL  #foreign kernel32;
-CloseHandle               :: (handle: *void)                                                                                    -> s32   #foreign kernel32;
-WaitForSingleObject       :: (handle: *void, milliseconds: u32)                                                                 -> u32   #foreign kernel32;
-
-BOOL :: enum s32
-{
-    FALSE :: 0;
-    TRUE  :: 1;
-}
-
-SecurityAttributes :: struct 
-{
-    nLength: u32;
-    lpSecurityDescriptor: *void;
-    bInheritHandle: BOOL;
-}
-
-ListEntry :: struct
-{
-   Flink: *ListEntry;
-   Blink: *ListEntry;
-}
-
-MutexDebug :: struct 
-{
-    Type:                      u16;
-    CreatorBackTraceIndex:     u16;
-    CriticalSection:           *Mutex;
-    ProcessLocksList:          ListEntry;
-    EntryCount:                u32;
-    ContentionCount:           u32;
-    Flags:                     u32;
-    CreatorBackTraceIndexHigh: u16;
-    SpareWORD:                 u16;
-}
-
-STANDARD_OUTPUT: *void;
-STANDARD_ERROR:  *void;
-
-one_time_init :: (synch_value: *s32, to_insert: Code) #expand 
-{
-    // A routine to run the code in 'to_insert' only once, even if
-    // there are multiple threads. synch_value.* should be 0 at startup.
-
-    // The values of synch_value.*:
-    // 0 = uninitialized, 1 = in progress init, 2 = initialized.
-
-    // Courtesy of Jeff Roberts.
-
-    while 1 
-    {
-        // @Warning: Apparently this read may not work on ARM, we need to look into it.
-        // The goal here is just to avoid the overhead of spamming the compare_and_swap.
-        if synch_value.* == 2  break;
-
-        success, old := compare_and_swap(synch_value, 0, 1);
-        if old == 
-        {
-            case 0;
-            {
-                #insert to_insert;
-            
-                if !compare_and_swap(synch_value, 1, 2) debug_break();  // Should not happen!
-            }
-            case 1;
-            {
-                for 1..4 #asm { pause; pause; pause; pause; pause; }
-            }
-            case 2; {}
-        }
-    }
-}
-
-init_synchronization :: () #no_context
-{
-    InitializeCriticalSection(*CONSOLE_LOCK);
-    
-    STD_OUTPUT_HANDLE :: -11;
-    STD_ERROR_HANDLE  :: -12;
-    STANDARD_OUTPUT = GetStdHandle(STD_OUTPUT_HANDLE);
-    STANDARD_ERROR  = GetStdHandle(STD_ERROR_HANDLE);
-}
-
-#scope_export
-
-debug_break :: () #no_context
-{
-	if #compile_time
-	{
-		compile_time_debug_break :: () #compiler #no_context;
-		compile_time_debug_break();
-	}
-	else
-	{
-		// TODO: Only supporting x64 for simplicity
-		#asm { int3; }
-	}
-}
-
-sleep :: inline (ms: s64) #no_context
-{
-	Sleep(cast(s32)ms);
-}
-
-start :: (semaphore: *Semaphore, value: s32 = 0) #no_context
-{
-	MAXIMUM :s32: 0x7fff_ffff;
-	semaphore.value = CreateSemaphoreW(null, value, MAXIMUM, null);
-}
-
-close :: (semaphore: *Semaphore) #no_context
-{
-	CloseHandle(semaphore.value);
-}
-
-wake :: inline (semaphore: *Semaphore) #no_context
-{
-	ReleaseSemaphore(semaphore.value, 1, null);
-}
-
-wait :: inline (semaphore: *Semaphore) #no_context
-{
-	INFINITE :u32 : 0xffff_ffff;
-	WaitForSingleObject(semaphore.value, INFINITE);
-}
-
-start :: (mutex: *Mutex) #no_context
-{
-	InitializeCriticalSection(mutex);
-}
-
-close :: (mutex: *Mutex) #no_context
-{
-
-}
-
-lock :: inline (mutex: *Mutex) #no_context
-{
-	EnterCriticalSection(mutex);
-}
-
-unlock :: inline (mutex: *Mutex) #no_context
-{
-	LeaveCriticalSection(mutex);
-}
-
-write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
-{
-	written: u32;
-    handle := ifx to_standard_error then STANDARD_ERROR else STANDARD_OUTPUT;
-    status := WriteFile(handle, s.data, cast(u32) s.count, *written, null);
-}
-
-}
-else #if OS == .LINUX
-{
-
+	#assert(false, "To Be Implemented");
 }
 else
 {
+	#assert(false, "Unknown OS");
 }
-
-// @Volatile: Context_Base must match internal compiler settings in general.h
-// It must exist and be relatively easy to compile (without requiring #run of
-// procedures, for example). Context_Base is going to be annoying to edit because
-// if you make an error of some kind, even a simple one like an undeclared identifier,
-// you won't get a helpful error message.
-Context_Base :: struct 
-{
-	context_info:  *Type_Info_Struct; // Allow libs or DLLs to see what context we are passing them. Will always be initialized to type_of(Context).
-	
-	thread_index   : u32;
-	
-	allocator      := default_allocator;
-	
-	logger         := runtime_support_default_logger;
-	logger_data    :  *void;
-	log_source_identifier: u64;      // Arbitrary identifier; settable by the main program.
-	log_level      :  Log_Level;     // Settable by the main program to inform anyone who logs.
-	
-	temporary_storage: *Temporary_Storage;
-	
-	// Currently, for simplicity we don't #if this out right now when _STACK_TRACE is false
-	// (but may later). It is probably convenient to let runtime code be able
-	// to check context.stack_trace to see if it is null in some cases,
-	// rather than needing all that to be #iffed as well. We will see.
-	stack_trace: *Stack_Trace_Node;
-	
-	assertion_failed := runtime_support_assertion_failed;
-	handling_assertion_failure := false;  // Used to avoid assert() infinite loops. Do not mess with this value.
-	
-	default_allocator :: Allocator.{runtime_support_default_allocator_proc, null};
-}
-
-Temporary_Storage :: struct
-{  // @Volatile: Must match general.h
-	data:     *u8;
-	size:     s64;
-	current_page_bytes_occupied: s64;
-	total_bytes_occupied: s64;
-	high_water_mark: s64;
-	last_set_mark_location: Source_Code_Location;
-	
-	overflow_allocator : Allocator;
-	
-	overflow_pages: *Overflow_Page;
-	original_data: *u8;  // Data to restore after clearing overflow pages. @Simplify: Maybe could be an Overflow_Page, but maybe we want to be able to assert on overflow_pages==null to ensure performance.
-	original_size: s64;
-	
-	Overflow_Page :: struct
-	{
-		next: *Overflow_Page;
-		allocator: Allocator;
-		size: s64;
-	}
-}
-
-set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
-{
-	ts.data = data;
-	ts.size = count;
-	
-	ts.original_data = data;
-	ts.original_size = count;
-}
-
-#scope_module
-
-CONSOLE_LOCK: Mutex;
-SYNC_INITTED: s32 = 0;

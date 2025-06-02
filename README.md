@@ -3,11 +3,12 @@
 
 Build Parameters:
 
-	- optimise: whether build with optimisation on. Default: true
-	- platform: whether platform to build: Required (wasm|win64|linux).
-	- wasm-compiler-path: compiler to generate wasm files from wat. Default: "wat2wasm"
-	- wasm-nr-pages: how many pages the wasm memory will have. Default: 100
-	- max-thread-count: maximum number of threads. Default: 32
+	- optimise: whether build with optimisation on. Default = true
+	- internal: whether to build internal code paths. Default = false;
+	- max-thread-count: maximum number of threads. Default = 32
+	- platform: whether platform to build. Required = (wasm|win64|linux).
+	- wasm-compiler-path: compiler to generate wasm files from wat. Default = "wat2wasm"
+	- wasm-nr-pages: how many pages the wasm memory will have. Default = 100
 
 e.g: `jai jai/build.jai - -platform wasm`
 

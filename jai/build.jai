@@ -250,6 +250,7 @@ export prepare_wasm_app function (modules, imports, stack_pointer)
 					
 					return -1;
 				},
+				wasm_get_random_number: () => { return BigInt(Math.random()); },
 				wasm_write_string: (count, data, toStandardError) =>
 				{
 					const value = jaiTojsString(memory.buffer, data, count);
@@ -389,6 +390,7 @@ Platform :: enum
 Options :: struct
 {
 	optimise: bool;
+	internal: bool;
 	
 	cache_line_size:  s64;
 	max_thread_count: s64;
@@ -512,6 +514,7 @@ build_win64 :: (build_parent_options: Build_Options, options: Options, platform_
 	
 	set_build_options(build_child_options, w);
 	
+	remap_import(w, "*", "Runtime_Support"  , "Runtime"  );
 	remap_import(w, "*", "Default_Allocator", "Allocator");
 	
 	compiler_begin_intercept(w);
@@ -522,6 +525,7 @@ build_win64 :: (build_parent_options: Build_Options, options: Options, platform_
 	add_build_string(tprint("TEMP_MEMORY_SIZE :: %;", platform_options.temp_memory_size), w);
 	add_build_string(tprint("CACHE_LINE_SIZE :: %;", options.cache_line_size), w);
 	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
+	add_build_string(tprint("INTERNAL :: %;", options.internal), w);
 	
 	compiler_end_intercept(w);
 }
@@ -577,11 +581,11 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 		compiler_report(tprint("'worker_nr_of_pages(%)' must be greater than 'temp_memory_size(%)'", platfomr_options.worker_nr_pages, platfomr_options.temp_nr_pages));
 	}
 
-	// clang -Oz --target=wasm64 -nostdlib -c -o utils.o utils.c
 /*
   	(global $__stack_pointer (;0;) (import "env" "__stack_pointer") (mut i64))
 */
 
+	// clang -Oz --target=wasm64 -nostdlib -c -o utils.o utils.c
 	allocator_object_file_path := "modules/Allocator/utils.o";
 	build_child_options.additional_linker_arguments = .[
 		"--no-entry",
@@ -603,6 +607,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	}
 	set_build_options(build_child_options, w);
 	
+	remap_import(w, "*", "Runtime_Support"  , "Runtime"  );
 	remap_import(w, "*", "Default_Allocator", "Allocator");
 	
 	compiler_begin_intercept(w);
@@ -612,6 +617,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	add_build_string(tprint("TEMP_NR_OF_PAGES :: %;", platfomr_options.temp_nr_pages), w);
 	add_build_string(tprint("CACHE_LINE_SIZE :: %;", options.cache_line_size), w);
 	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
+	add_build_string(tprint("INTERNAL :: %;", options.internal), w);
 	
 	while true
 	{
@@ -715,6 +721,10 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 			case "-optimise";
 			{
 				options.optimise = true;
+			}
+			case "-internal";
+			{
+				options.internal = true;
 			}
 			case "-platform";
 			{

@@ -40,7 +40,13 @@ MemoryBlock :: struct
 // Foreigns
 /////////////////////////////
 
-carve_memory_block :: (memory_block_index: s64, memory_block_count: s64, worker_memory_size: s64, temp_memory_size: s64) -> MemoryBlock #foreign;
+get_random_seed    :: () -> u64 #foreign "wasm_get_random_number";
+carve_memory_block :: (
+	memory_block_index: s64,
+	memory_block_count: s64,
+	worker_memory_size: s64,
+	temp_memory_size: s64
+) -> MemoryBlock #foreign;
 
 /////////////////////////////
 
@@ -74,6 +80,7 @@ init :: (thread_count: s64) #c_call
 	init_arena(*MAIN_ARENA_ALLOCATOR, thread_count);
 	context.allocator.data = *MAIN_ARENA_ALLOCATOR;
 
+	init_thread_group(enable_logging=true, get_random_seed());
 	for 1..thread_count-1
 	{
 		thread_arena_allocator := New(ArenaAllocator);
@@ -114,14 +121,14 @@ main :: () #c_call
 // Imports
 /////////////////////////////
 
-#import "Basic";
+#import "Basic"()(ENABLE_ASSERT=INTERNAL);
 #import "Common";
 #import "Allocator";
 #import "Threading"()(
 	Work             =Work,
 	MAX_THREAD_COUNT =MAX_THREAD_COUNT,
 	CACHE_LINE_SIZE  =CACHE_LINE_SIZE,
-	LOGGING          =true,
+	LOGGING          =INTERNAL,
 	ThreadProc       =thread_proc,
 );
 

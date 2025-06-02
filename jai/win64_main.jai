@@ -100,23 +100,12 @@ using Creation_Flags :: enum_flags u32
 // Structs
 /////////////////////////////
 
-Win64Thread :: struct
+Win64Thread :: AlignToCacheLine(struct
 {
-	Base :: struct
-	{
-		index: s64;
-		
-		allocator: ArenaAllocator;
-	}
+	index:     s64;
 	
-	DESIRED_SIZE :: #run align_forward(size_of(Base), CACHE_LINE_SIZE);
-	
-	using base: Base;
-#place base;
-	_: [DESIRED_SIZE] u8 = ---;
-}
-
-#assert (size_of(Win64Thread) == CACHE_LINE_SIZE);
+	allocator: ArenaAllocator;
+});
 
 /////////////////////////////
 
@@ -191,15 +180,17 @@ __system_entry_point :: (argc: s32, argv: **u8) -> s32 #c_call
 
 main :: () -> s32
 {
-	toggle_logging();
-
 	thread_count := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
 	if thread_count > MAX_THREAD_COUNT
 	{
 		thread_count = cast(u32)MAX_THREAD_COUNT;
 	}
+
 	// NOTE: excluding the processor running the main thread
 	thread_count -= 1;
+	
+	seed := current_time_monotonic();
+	init_thread_group(enable_logging=true, seed.low);
 	
 	for 0..thread_count-1
 	{
@@ -213,17 +204,29 @@ main :: () -> s32
 		assert(handle != null);
 		CloseHandle(handle);
 	}
+
+	sleep(5000);
 	
-	add_work(.{.Test1});
-	add_work(.{.Test2});
-	sleep(10000);
+	work_added := 16;
+	for 1..work_added
+	{
+		add_work(.{.Test1});
+	}
+		
+	work_count: s64;
+	while work_count < work_added
+	{
+		for *work_per_thread: get_completed_work()
+		{
+			count := work_per_thread.count;
+			
+			work_count += work_per_thread.count;
+		}
+		
+		FREE(.Temp);
+	}
 	
 	shutdown();
-	
-	while true
-	{
-	
-	}
 	
 	return 0;
 }
@@ -235,14 +238,14 @@ main :: () -> s32
 // Imports
 /////////////////////////////
 
-#import "Basic";
+#import "Basic"()(ENABLE_ASSERT=INTERNAL);
 #import "Common";
 #import "Allocator";
 #import "Threading"()(
 	Work             =Work,
 	MAX_THREAD_COUNT =MAX_THREAD_COUNT,
 	CACHE_LINE_SIZE  =CACHE_LINE_SIZE,
-	LOGGING          =true,
+	LOGGING          =INTERNAL,
 	ThreadProc       =thread_proc
 );
 
