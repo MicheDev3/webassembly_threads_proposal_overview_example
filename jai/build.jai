@@ -380,6 +380,12 @@ Platform :: enum
 	Linux;
 }
 
+Backend :: enum
+{
+	X64;
+	LLVM;
+}
+
 /////////////////////////////
 
 
@@ -405,9 +411,13 @@ Win64Options :: struct
 	temp_memory_size:   s64;
 	thread_memory_size: s64;
 	
+	backend: Backend;
+	
 	main_memory_size   = #run MEBIBYTES(100);
 	temp_memory_size   = #run MEBIBYTES(5);
 	thread_memory_size = #run MEBIBYTES(10);
+	
+	backend = .X64;
 }
 
 WasmOptions :: struct
@@ -495,26 +505,39 @@ build_win64 :: (build_parent_options: Build_Options, options: Options, platform_
 	build_child_options := get_build_options(w);
 	copy_commonly_propagated_fields(build_parent_options, *build_child_options);
 	
-	build_child_options.backend                     = .LLVM;
-	build_child_options.output_executable_name      = "win64";
-	build_child_options.runtime_support_definitions = .OMIT;
-	
 	import_paths: [..]string;
 	array_add(*import_paths, tprint("%modules", #filepath));
 	for build_child_options.import_path
 	{
 		array_add(*import_paths, it);
 	}
-	build_child_options.import_path = import_paths;
-
-	if options.optimise
+	
+	llvm: bool;
+	build_child_options.output_executable_name      = "win64";
+	build_child_options.runtime_support_definitions = .OMIT;
+	if platform_options.backend == .X64
 	{
-		set_optimization(*build_child_options, .VERY_OPTIMIZED);
+		llvm = false;
+		build_child_options.backend                 = .X64;
+		if options.optimise
+		{
+			compiler_report("You cannot run optimisation when using X64 backend");
+		}
 	}
+	else
+	{
+		llvm = true;
+		build_child_options.backend                 = .LLVM;
+		if options.optimise
+		{
+			set_optimization(*build_child_options, .VERY_OPTIMIZED);
+		}
+	}
+	build_child_options.import_path = import_paths;
 	
 	set_build_options(build_child_options, w);
 	
-	remap_import(w, "*", "Runtime_Support"  , "Runtime"  );
+	remap_import(w, "*", "Runtime_Support"  , "Win64_Runtime");
 	remap_import(w, "*", "Default_Allocator", "Allocator");
 	
 	compiler_begin_intercept(w);
@@ -526,6 +549,7 @@ build_win64 :: (build_parent_options: Build_Options, options: Options, platform_
 	add_build_string(tprint("CACHE_LINE_SIZE :: %;", options.cache_line_size), w);
 	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
 	add_build_string(tprint("INTERNAL :: %;", options.internal), w);
+	add_build_string(tprint("LLVM :: %;", llvm), w);
 	
 	compiler_end_intercept(w);
 }
@@ -607,7 +631,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	}
 	set_build_options(build_child_options, w);
 	
-	remap_import(w, "*", "Runtime_Support"  , "Runtime"  );
+	remap_import(w, "*", "Runtime_Support"  , "Wasm_Runtime");
 	remap_import(w, "*", "Default_Allocator", "Allocator");
 	
 	compiler_begin_intercept(w);
@@ -735,6 +759,16 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 					case "wasm";  { platform = .Wasm;  }
 					case "win64"; { platform = .Win64; }
 					case "linux"; { platform = .Linux; }
+				}
+			}
+			case "-backend";
+			{
+				index += 1;
+				
+				if args[index] == 
+				{
+					case "x64";  { platform_options.backend = .X64;  }
+					case "llvm"; { platform_options.backend = .LLVM; }
 				}
 			}
 			case "-wasm-compiler-path";

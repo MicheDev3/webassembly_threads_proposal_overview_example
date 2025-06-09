@@ -238,6 +238,7 @@ main :: () -> s32
 // Imports
 /////////////////////////////
 
+#import "Atomics"()(LLVM);
 #import "Basic"()(ENABLE_ASSERT=INTERNAL);
 #import "Common";
 #import "Allocator";
