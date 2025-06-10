@@ -10,7 +10,6 @@
 #if LLVM
 {
 
-// NOTE(mike): https://llvm.org/docs/LangRef.html#int-memcpy
 atomic_memcpy_i32 :: (dst: *void, src: *void, len: s64, is_volatile: bool) #intrinsic "llvm.memcpy.inline.p0.p0.i32";
 atomic_memcpy_i64 :: (dst: *void, src: *void, len: s64, is_volatile: bool) #intrinsic "llvm.memcpy.inline.p0.p0.i64";
 

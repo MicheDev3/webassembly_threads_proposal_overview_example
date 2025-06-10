@@ -205,28 +205,56 @@ main :: () -> s32
 		CloseHandle(handle);
 	}
 
-	sleep(5000);
+	// TODO: work out the rest
+	count := 50;
+	points_per_thread := 5;
 	
-	work_added := 16;
-	for 1..work_added
+	geometry: Geometry;
+	init_geometry(*geometry, count);
+	
+	amount := 1.0;
+	offset := 0;
+	while offset < count
 	{
-		add_work(.{.Test1});
+		work: Work;
+		work.type = .Geometry;
+		work.geometry.positions = .{points_per_thread, geometry.positions.entries + offset};
+		work.geometry.normals   = .{points_per_thread, geometry.normals\ .entries + offset};
+		work.geometry.amount = amount;
+		
+		add_work(work);
+		
+		offset += points_per_thread;
+		amount += 1.0;
 	}
 		
 	work_count: s64;
-	while work_count < work_added
+	while work_count < (count / points_per_thread)
 	{
 		for *work_per_thread: get_completed_work()
 		{
 			count := work_per_thread.count;
 			
-			work_count += work_per_thread.count;
+			work_count += work_per_thread.count;			
 		}
 		
 		FREE(.Temp);
 	}
 	
 	shutdown();
+	
+	amount = 0.0;
+	for geometry.positions
+	{
+		if it_index % points_per_thread == 0
+		{
+			amount += 1;
+		}
+		
+		normal   := geometry.normals[it_index];
+		position := normal*amount;
+		assert(it == position);
+	}
 	
 	return 0;
 }

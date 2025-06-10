@@ -5,8 +5,7 @@
 
 WorkType :: enum
 {
-	Test1;
-	Test2;
+	Geometry;
 }
 
 /////////////////////////////
@@ -19,6 +18,23 @@ WorkType :: enum
 Work :: struct
 {
 	type: WorkType;
+	
+	union
+	{
+		geometry: struct
+		{
+			using _: Geometry;
+			amount: float;
+		}
+	}
+}
+
+// TODO: Either make sure each work is padded to a cache line (ideal) or
+// pad the Vector3 definition here
+Geometry :: struct
+{
+	positions: Block(Vector3);
+	normals:   Block(Vector3);
 }
 
 /////////////////////////////
@@ -28,23 +44,43 @@ Work :: struct
 // Functions
 /////////////////////////////
 
+init_geometry :: (geometry: *Geometry, count: s64)
+{
+	reserve(*geometry.positions, count);
+	reserve(*geometry.normals,   count);
+	// TODO: Properly init the geometry
+	for *geometry.normals
+	{
+		it.* = .{1, 1, 1};
+	}
+}
+
 thread_proc :: (data: *void)
 {
 	work := cast(*Work) data;
 	
 	if #complete work.type ==
 	{
-		case .Test1; 
+		case .Geometry; 
 		{
-		
-		}
-		case .Test2; 
-		{
-		
+			geometry := work.geometry;
+			
+			for geometry.normals
+			{
+				position := it*geometry.amount;
+				geometry.positions[it_index] += position;
+			}
 		}
 	} 
-	
-	sleep(1000);
 }
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Imports
+/////////////////////////////
+
+#import "Math";
 
 /////////////////////////////

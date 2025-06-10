@@ -374,7 +374,7 @@ DONE;
 Platform :: enum
 {
 	None;
-
+	
 	Wasm;
 	Win64;
 	Linux;
@@ -431,7 +431,7 @@ WasmOptions :: struct
 	main_nr_pages:   s64;
 	temp_nr_pages:   s64;
 	worker_nr_pages: s64;
-
+	
 	compiler_path   = "wat2wasm";
 	
 	js_\ output_path = "js";
@@ -517,21 +517,28 @@ build_win64 :: (build_parent_options: Build_Options, options: Options, platform_
 	build_child_options.runtime_support_definitions = .OMIT;
 	if platform_options.backend == .X64
 	{
-		llvm = false;
 		build_child_options.backend                 = .X64;
+		build_child_options.enable_bytecode_inliner = false;
 		if options.optimise
 		{
 			compiler_report("You cannot run optimisation when using X64 backend");
 		}
+		
+		llvm = false;
 	}
 	else
 	{
-		llvm = true;
 		build_child_options.backend                 = .LLVM;
 		if options.optimise
 		{
 			set_optimization(*build_child_options, .VERY_OPTIMIZED);
 		}
+		else
+		{
+			build_child_options.enable_bytecode_inliner = false;
+		}
+		
+		llvm = true;
 	}
 	build_child_options.import_path = import_paths;
 	
@@ -598,17 +605,17 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	{
 		compiler_report(tprint("'nr_pages(%)' must be greater than 'worker_nr_of_pages(%)'", total_memory_size, platfomr_options.worker_nr_pages));
 	}
-
+	
 	// TODO: Add an extra padding?
 	if platfomr_options.worker_nr_pages <= platfomr_options.temp_nr_pages
 	{
 		compiler_report(tprint("'worker_nr_of_pages(%)' must be greater than 'temp_memory_size(%)'", platfomr_options.worker_nr_pages, platfomr_options.temp_nr_pages));
 	}
-
+	
 /*
-  	(global $__stack_pointer (;0;) (import "env" "__stack_pointer") (mut i64))
+	(global $__stack_pointer (;0;) (import "env" "__stack_pointer") (mut i64))
 */
-
+	
 	// clang -Oz --target=wasm64 -nostdlib -c -o utils.o utils.c
 	allocator_object_file_path := "modules/Allocator/utils.o";
 	build_child_options.additional_linker_arguments = .[
@@ -732,13 +739,13 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	
 	platform: Platform = .None;
 	options: Options; platform_options: Win64Options; w_options: WasmOptions;
-
+	
 	index: s64;
 	args := build_parent_options.compile_time_command_line;
 	while index < args.count
 	{
 		defer index += 1;
-
+		
 		option := args[index];
 		if option ==
 		{
@@ -754,7 +761,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 			{
 				index += 1;
 				
-				if args[index] == 
+				if args[index] ==
 				{
 					case "wasm";  { platform = .Wasm;  }
 					case "win64"; { platform = .Win64; }
@@ -765,7 +772,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 			{
 				index += 1;
 				
-				if args[index] == 
+				if args[index] ==
 				{
 					case "x64";  { platform_options.backend = .X64;  }
 					case "llvm"; { platform_options.backend = .LLVM; }
@@ -797,7 +804,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	}
 	
 	_, project_folder := split_from_right(#filepath, "jai");
-	if #complete platform == 
+	if #complete platform ==
 	{
 		case .None;
 		{

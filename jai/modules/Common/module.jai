@@ -214,7 +214,7 @@ PUSH_LOCK :: (mutex: *Mutex, code: Code) #expand
 /////////////////////////////
 
 //
-// NOTE(mike): Block functions
+// NOTE: Block functions
 //
 
 reserve :: inline (block: *$B/Block, count: s64)
@@ -224,7 +224,7 @@ reserve :: inline (block: *$B/Block, count: s64)
 }
 
 //
-// NOTE(mike): Array functions
+// NOTE: Array functions
 //
 
 insert :: inline (array: *$A/Array) -> *array.T
@@ -239,7 +239,7 @@ insert :: inline (array: *$A/Array) -> *array.T
 }
 
 //
-// NOTE(mike): LinkedList functions
+// NOTE: LinkedList functions
 //
 
 make_list :: inline ($T: Type, $DOUBLE_LINK: bool) -> LinkedList(T, DOUBLE_LINK)
@@ -290,7 +290,7 @@ insert :: inline
 	return result;
 }
 
-head :: inline
+get_head :: inline
 (
 	list: *$L/LinkedList
 ) -> *ListLink(list.T, list.DOUBLE_LINK)
@@ -304,7 +304,7 @@ head :: inline
 	return result;
 }
 
-last :: inline
+get_tail :: inline
 (
 	list: *$L/LinkedList
 ) -> *ListLink(list.T, list.DOUBLE_LINK)
@@ -320,15 +320,28 @@ last :: inline
 }
 else
 {
-	// TODO: Implement this
-	#assert false "To be implemented";
+	result := list.sentinel.next;
+	while true
+	{
+		if result.next == *list.sentinel
+		{
+			break;
+		}
+		
+		result = result.next;
+	}
+	
+	if result == *list.sentinel
+	{
+		result = null;
+	}
 }
 	
 	return result;
 }
 
 //
-// NOTE(mike): FreeLinkedList functions
+// NOTE: FreeLinkedList functions
 //
 
 make_free_list :: inline ($T: Type, $DOUBLE_LINK: bool) -> FreeLinkedList(T, DOUBLE_LINK)
@@ -361,22 +374,22 @@ insert :: inline
 	return result;
 }
 
-head :: inline
+get_head :: inline
 (
 	list: *$L/FreeLinkedList
 ) -> *list.Link
 {
-	result := head(*list.used);
+	result := get_head(*list.used);
 	
 	return result;
 }
 
-last :: inline
+get_tail :: inline
 (
 	list: *$L/FreeLinkedList
 ) -> *list.Link
 {
-	result := last(*list.used);
+	result := get_tail(*list.used);
 	
 	return result;
 }
@@ -387,46 +400,88 @@ delete :: inline
 	link: *list.Link
 )
 {
+	sentinel := get_sentinel(list);
+	assert(link != sentinel);
+	assert(list.used.count > 0);
 	
 #if list.DOUBLE_LINK
 {
+	link.prev.next = link.next;
+	link.next.prev = link.prev;
 	
+	link.next = list.free.sentinel.next;
+	link.prev = list.free.sentinel;
+	
+	link.next.prev = link;
+	link.prev.next = link;
 }
 else
 {
-	// TODO: Implement this
-	#assert false "To be implemented";
-}
+	prev := list.used.sentinel.next;
+	while true
+	{
+		if prev.next == link
+		{
+			break;
+		}
+		
+		prev = prev.next;
+	}
 	
+	prev.next = link.next;
+	
+	link.next = list.free.sentinel.next;
+	list.free.sentinel.next = link;
 }
-
-delete :: inline
-(
-	list: *$L/FreeLinkedList,
-	first: *list.Link,
-	last:  *list.Link
-)
-{
-	last.next = list.free.sentinel.next;
-	list.free.sentinel.next = first;
 	
 	list.used.count -= 1;
 	list.free.count += 1;
 }
 
-reset :: inline (list: *$L/FreeLinkedList)
+delete :: inline
+(
+	list: *$L/FreeLinkedList,
+	head: *list.Link,
+	tail: *list.Link,
+	count: s64
+)
 {
-	list.used.sentinel.next = list.used.sentinel;
+	sentinel := get_sentinel(list);
+	assert(head != sentinel);
+	// assert(tail != sentinel);
+	assert(list.used.count > 0);
+
+#if list.DOUBLE_LINK
+{
+	head.prev.next = tail.next;
+	tail.next.prev = head.prev;
+	
+	head.prev = list.free.sentinel;
+	tail.next = list.free.sentinel.next;
+	
+	head.prev.next = head;
+	tail.next.prev = tail;
+}
+else
+{
+	list.used.sentinel.next = tail.next;
+	
+	tail.next = list.free.sentinel.next.next;
+	list.free.sentinel.next = head;
+}
+	
+	list.free.count += count;
+	list.used.count -= count;
 }
 
-count :: inline (list: *$L/FreeLinkedList) -> s64
+get_count :: inline (list: *$L/FreeLinkedList) -> s64
 {
 	result := list.used.count;
 	
 	return result;
 }
 
-sentinel :: inline (list: *$L/FreeLinkedList) -> *list.Link
+get_sentinel :: inline (list: *$L/FreeLinkedList) -> *list.Link
 {
 	result := list.used.sentinel;
 	

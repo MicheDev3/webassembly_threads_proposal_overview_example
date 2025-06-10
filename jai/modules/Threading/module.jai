@@ -159,7 +159,7 @@ add_work :: inline (work: Work)
 	thread2 := *THREAD_GROUP.threads[random2];
 
 	thread := (
-		ifx count(*thread1.available) > count(*thread2.available)
+		ifx get_count(*thread1.available) > get_count(*thread2.available)
 		then thread2 
 		else thread1
 	);
@@ -174,7 +174,7 @@ PUSH_LOCK(*thread.available_mutex, #code
 	wake(*thread.semaphore);
 }
 
-run_thread :: inline (index: s64)
+run_thread :: (index: s64)
 {
 	assert(THREAD_GROUP.initted);
 
@@ -210,7 +210,7 @@ run_thread :: inline (index: s64)
 		link: *WorkList.Link;
 PUSH_LOCK(*thread.available_mutex, #code
 {
-		link = last(*thread.available);
+		link = get_tail(*thread.available);
 		assert(link != null);
 
 		work = link.value;
@@ -238,35 +238,36 @@ get_completed_work :: () -> LinkedList(Block(Work))
 	result := make_list(Block(Work), DOUBLE_LINK=false);
 	for *thread: THREAD_GROUP.threads
 	{
-		size: s64;
-		first: *WorkList.Link;
+		count: s64;
+		head: *WorkList.Link;
 PUSH_LOCK(*thread.completed_mutex, #code
 {
-		size  = count(*thread.completed);
-		first = head (*thread.completed);
-		reset(*thread.completed);
+		count = get_count(*thread.completed);
+		head  = get_head (*thread.completed);
 });
 		
 		block := insert(*result, .{});
-		if size
+		if count
 		{
-			reserve(*block.value, size);
+			reserve(*block.value, count);
 			
-			index := 0;
-			last := first;
-			for 0..size-1
+			tail := head;
+			sentinel := get_sentinel(*thread.completed);
+			for 0..count-1
 			{
-				assert(last != sentinel(*thread.completed));
-				block.value[it] = last.value;
+				assert(tail != sentinel);
+				block.value[it] = tail.value;
 				
-				last = last.next;
+				tail = tail.next;
 			}
 			
 PUSH_LOCK(*thread.completed_mutex, #code
 {
-			delete(*thread.completed, first, last);
+			delete(*thread.completed, head, tail, count);
 });
 		}
+		
+		write_message("Thread(%): completed % works\n", thread.index, count);
 	}
 	
 	return result;
