@@ -142,6 +142,8 @@ init_thread :: inline (index: s64, arena: *ArenaAllocator)
 	thread := insert(*THREAD_GROUP.threads);
 	thread.index = index;
 	start(*thread.semaphore);
+	start(*thread.available_mutex);
+	start(*thread.completed_mutex);
 	thread.allocator = .{allocator_proc, arena};
 	thread.available = make_free_list(Work, DOUBLE_LINK=true,, thread.allocator);
 	thread.completed = make_free_list(Work, DOUBLE_LINK=true,, thread.allocator);	
@@ -191,6 +193,8 @@ run_thread :: (index: s64)
 // {
 		
 		close(*thread.semaphore);
+		close(*thread.available_mutex);
+		close(*thread.completed_mutex);
 
 		write_message("Thread(%): terminated\n", index);
 			

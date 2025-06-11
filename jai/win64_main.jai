@@ -180,18 +180,23 @@ __system_entry_point :: (argc: s32, argv: **u8) -> s32 #c_call
 
 main :: () -> s32
 {
+	// NOTE: :OS_DEPENDENT
+	//{
 	thread_count := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+	//}
 	if thread_count > MAX_THREAD_COUNT
 	{
 		thread_count = cast(u32)MAX_THREAD_COUNT;
 	}
-
+	
 	// NOTE: excluding the processor running the main thread
 	thread_count -= 1;
 	
 	seed := current_time_monotonic();
 	init_thread_group(enable_logging=true, seed.low);
-	
+
+	// NOTE: :OS_DEPENDENT
+	//{
 	for 0..thread_count-1
 	{
 		win64_thread := New(Win64Thread);
@@ -204,32 +209,51 @@ main :: () -> s32
 		assert(handle != null);
 		CloseHandle(handle);
 	}
+	//}
 
-	// TODO: work out the rest
-	count := 50;
+	count := 100004;
 	points_per_thread := 5;
 	
 	geometry: Geometry;
 	init_geometry(*geometry, count);
 	
+	iterations := (count / points_per_thread);
+	
 	amount := 1.0;
-	offset := 0;
-	while offset < count
+	work_count: s64;
+	while work_count < iterations
 	{
 		work: Work;
 		work.type = .Geometry;
-		work.geometry.positions = .{points_per_thread, geometry.positions.entries + offset};
-		work.geometry.normals   = .{points_per_thread, geometry.normals\ .entries + offset};
+		work.geometry.positions = .{points_per_thread, geometry.positions.entries + work_count*points_per_thread};
+		work.geometry.normals   = .{points_per_thread, geometry.normals\ .entries + work_count*points_per_thread};
+		work.geometry.amount = amount;
+		
+		add_work(work);
+
+		amount += 1.0;
+		
+		work_count += 1;
+	}
+	
+	// NOTE: working out the rest
+	if work_count*points_per_thread < count
+	{
+		offset := work_count*points_per_thread;
+
+		work: Work;
+		work.type = .Geometry;
+		work.geometry.positions = .{count - offset, geometry.positions.entries + offset};
+		work.geometry.normals   = .{count - offset, geometry.normals\ .entries + offset};
 		work.geometry.amount = amount;
 		
 		add_work(work);
 		
-		offset += points_per_thread;
-		amount += 1.0;
+		iterations += 1;
 	}
-		
-	work_count: s64;
-	while work_count < (count / points_per_thread)
+
+	work_count = 0;
+	while work_count < iterations
 	{
 		for *work_per_thread: get_completed_work()
 		{
@@ -266,7 +290,10 @@ main :: () -> s32
 // Imports
 /////////////////////////////
 
+// NOTE: :NATIVE_REQUIRED
+//{
 #import "Atomics"()(LLVM);
+//}
 #import "Basic"()(ENABLE_ASSERT=INTERNAL);
 #import "Common";
 #import "Allocator";

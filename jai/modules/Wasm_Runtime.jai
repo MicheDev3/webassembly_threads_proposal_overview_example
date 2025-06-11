@@ -4,6 +4,8 @@
 // version of it.
 //
 
+// NOTE: :OS_DEPENDENT
+
 #module_parameters(DEFINE_SYSTEM_ENTRY_POINT: bool, DEFINE_INITIALIZATION: bool, ENABLE_BACKTRACE_ON_CRASH: bool);
 
 // NOTE: Required to build for unix oses.
@@ -533,6 +535,16 @@ wake :: inline (semaphore: *Semaphore) #no_context
 wait :: inline (semaphore: *Semaphore) #no_context
 {
 	wasm_wait(*semaphore.value);
+}
+
+start :: (mutex: *Mutex) #no_context
+{
+
+}
+
+close :: (mutex: *Mutex) #no_context
+{
+
 }
 
 lock :: inline (mutex: *Mutex) #no_context

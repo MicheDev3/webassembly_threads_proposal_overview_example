@@ -4,6 +4,8 @@
 // version of it.
 //
 
+// NOTE: :OS_DEPENDENT
+
 #module_parameters(DEFINE_SYSTEM_ENTRY_POINT: bool, DEFINE_INITIALIZATION: bool, ENABLE_BACKTRACE_ON_CRASH: bool);
 
 // NOTE: Required to build for unix oses.
@@ -491,10 +493,33 @@ __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, file
 
 #scope_export
 
+// TODO: There is a issue with the TicketMutex system when we push a lot of works like 
+// in the thousands or greater.
+USE_TICKET_MUTEX :: false;
+
+#if USE_TICKET_MUTEX
+{
+
 Mutex :: struct
 {
     ticket:  u64;
     serving: u64;
+}
+
+}
+else
+{
+
+Mutex :: struct 
+{
+    DebugInfo:      *MutexDebug;
+    LockCount:      u32;
+    RecursionCount: u32;
+    OwningThread:   *void; // from the thread's ClientId->UniqueThread
+    LockSemaphore:  *void;
+    SpinCount:      u64;   // force size on 64-bit systems when packed
+}
+
 }
 
 Semaphore :: struct
@@ -543,7 +568,28 @@ wait :: inline (semaphore: *Semaphore) #no_context
 	WaitForSingleObject(semaphore.value, INFINITE);
 }
 
+start :: (mutex: *Mutex) #no_context
+{
+
+#if USE_TICKET_MUTEX
+{
+}
+else
+{
+	InitializeCriticalSection(mutex);
+}
+
+}
+
+close :: (mutex: *Mutex) #no_context
+{
+
+}
+
 lock :: inline (mutex: *Mutex) #no_context
+{
+
+#if USE_TICKET_MUTEX
 {
 	ticket := atomic_add(*mutex.ticket, 1);
 	while ticket != atomic_read(*mutex.serving)
@@ -551,10 +597,25 @@ lock :: inline (mutex: *Mutex) #no_context
 		#asm { pause; }
 	}
 }
+else
+{
+	EnterCriticalSection(mutex);
+}
+
+}
 
 unlock :: inline (mutex: *Mutex) #no_context
 {
+
+#if USE_TICKET_MUTEX
+{
 	atomic_add(*mutex.serving, 1);
+}
+else
+{
+	LeaveCriticalSection(mutex);
+}
+
 }
 
 write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
@@ -591,6 +652,31 @@ ListEntry :: struct
 {
    Flink: *ListEntry;
    Blink: *ListEntry;
+}
+
+#if USE_TICKET_MUTEX
+{
+}
+else
+{
+
+MutexDebug :: struct 
+{
+    Type:                      u16;
+    CreatorBackTraceIndex:     u16;
+    CriticalSection:           *Mutex;
+    ProcessLocksList:          ListEntry;
+    EntryCount:                u32;
+    ContentionCount:           u32;
+    Flags:                     u32;
+    CreatorBackTraceIndexHigh: u16;
+    SpareWORD:                 u16;
+}
+
+InitializeCriticalSection :: (section: *Mutex)                                                                                           #foreign kernel32;
+EnterCriticalSection      :: (lpCriticalSection: *Mutex)                                                                                 #foreign kernel32;
+LeaveCriticalSection      :: (lpCriticalSection: *Mutex)                                                                                 #foreign kernel32;
+
 }
 
 WriteFile                 :: (handle: *void, buffer: *void, buffer_length: u32, written_result: *u32, overlapped: *void)        -> s32   #foreign kernel32;
@@ -637,6 +723,15 @@ one_time_init :: (synch_value: *s32, to_insert: Code) #expand
 
 init_synchronization :: () #no_context
 {
+
+#if USE_TICKET_MUTEX
+{
+}
+else
+{
+	InitializeCriticalSection(*CONSOLE_LOCK);
+}
+
     STD_OUTPUT_HANDLE :: -11;
     STD_ERROR_HANDLE  :: -12;
     STANDARD_OUTPUT = GetStdHandle(STD_OUTPUT_HANDLE);

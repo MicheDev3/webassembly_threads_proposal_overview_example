@@ -61,7 +61,7 @@ thread_proc :: (data: *void)
 	
 	if #complete work.type ==
 	{
-		case .Geometry; 
+		case .Geometry;
 		{
 			geometry := work.geometry;
 			
@@ -71,7 +71,7 @@ thread_proc :: (data: *void)
 				geometry.positions[it_index] += position;
 			}
 		}
-	} 
+	}
 }
 
 /////////////////////////////
