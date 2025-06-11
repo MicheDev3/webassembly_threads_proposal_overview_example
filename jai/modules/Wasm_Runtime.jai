@@ -517,7 +517,7 @@ sleep :: inline (ms: s32) #no_context
 	wasm_sleep(*sentinel, (cast(s64)ms)*1000000);
 }
 
-start :: (semaphore: *Semaphore, value: s32 = 0) #no_context
+start :: (semaphore: *Semaphore, value: s32 = 1) #no_context
 {
 	semaphore.value = value;
 }
