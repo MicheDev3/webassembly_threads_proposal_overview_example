@@ -55,9 +55,9 @@ carve_memory_block :: (
 // Functions
 /////////////////////////////
 
-init_arena :: inline (arena: *ArenaAllocator, thread_count: s64)
+init_arena :: inline (arena: *ArenaAllocator, thread_count: s64, index: s64)
 {
-	block := carve_memory_block(0, thread_count, WORKER_NR_OF_PAGES, TEMP_NR_OF_PAGES);
+	block := carve_memory_block(index, thread_count, WORKER_NR_OF_PAGES, TEMP_NR_OF_PAGES);
 	arena.main = .{block.main_base, block.main_size, 0};
 	arena.temp = .{block.temp_base, block.temp_size, 0};
 }
@@ -77,14 +77,14 @@ init :: (thread_count: s64) #c_call
     assert(INITTED == false);
     assert(thread_count > 0 && thread_count <= MAX_THREAD_COUNT);
 	
-	init_arena(*MAIN_ARENA_ALLOCATOR, thread_count);
+	init_arena(*MAIN_ARENA_ALLOCATOR, thread_count, 0);
 	context.allocator.data = *MAIN_ARENA_ALLOCATOR;
 
 	init_thread_group(enable_logging=true, get_random_seed());
 	for 1..thread_count-1
 	{
 		thread_arena_allocator := New(ArenaAllocator);
-		init_arena(thread_arena_allocator, thread_count);
+		init_arena(thread_arena_allocator, thread_count, it);
 		
 		init_thread(it, thread_arena_allocator);
 	}

@@ -332,7 +332,7 @@ async function load_wasm_binary()
 							}
 							worker.postMessage(data);
 							worker.onmessage = (event) => resolve(event.data);
-							worker.onerror   = reject;
+							worker.onerror   = (err)=>console.error(err);
 						}
 					)
 				}
