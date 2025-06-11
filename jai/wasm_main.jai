@@ -40,7 +40,7 @@ MemoryBlock :: struct
 // Foreigns
 /////////////////////////////
 
-get_random_seed    :: () -> u64 #foreign "wasm_get_random_number";
+get_random_seed    :: () -> u64 #foreign "wasm_get_random_seed";
 carve_memory_block :: (
 	memory_block_index: s64,
 	memory_block_count: s64,

@@ -228,7 +228,7 @@ function jaiTojsString(buffer, pointer, length)
 	return decoder.decode(tempBuffer);
 }
 
-export prepare_wasm_app function (modules, imports, stack_pointer)
+export function prepare_wasm_app(modules, imports, stack_pointer)
 {
 	const memory = imports["env"]["memory"];
 	const atomics = new WebAssembly.Instance(modules[0], imports);
@@ -250,7 +250,7 @@ export prepare_wasm_app function (modules, imports, stack_pointer)
 					
 					return -1;
 				},
-				wasm_get_random_number: () => { return BigInt(Math.random()); },
+				wasm_get_random_seed: () => { return BigInt(Math.floor(Math.random()*Number.MAX_SAFE_INTEGER)); },
 				wasm_write_string: (count, data, toStandardError) =>
 				{
 					const value = jaiTojsString(memory.buffer, data, count);
@@ -304,11 +304,17 @@ async function load_wasm_binary()
 				
 				var cpuCount = window.navigator.hardwareConcurrency;
 				if (cpuCount > %3) { cpuCount = %3; }
+				const cpuCountB = BigInt(cpuCount);
 	
 				const total_stack_size = BigInt(%2);
 				const stack_size = total_stack_size/BigInt(cpuCount);
+				const imports =  {
+					env: {
+						memory: memory
+					}
+				};
 				const app = prepare_wasm_app(modules, imports, total_stack_size);
-				app.exports.init(cpuCount);
+				app.exports.init(cpuCountB);
 				
 				for (let i = 1; i < cpuCount; i++)
 				{
