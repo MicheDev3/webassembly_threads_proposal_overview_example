@@ -104,14 +104,85 @@ run_worker :: (index: s64) #c_call
 	run_thread(index);
 }
 
+DISPATCHED_TASKS_COUNT:s64;
+COMPLETED_TASKS_COUNT:s64;
+
 #program_export
-main :: () #c_call
+dispatch_work :: () #c_call
 {
 	push_context,defer_pop CONTEXT;
 	
 	assert(INITTED == true);
 
+	count := 100004;
+	points_per_thread := 5;
+	
+	geometry: Geometry;
+	init_geometry(*geometry, count);
+	
+	DISPATCHED_TASKS_COUNT = (count / points_per_thread);
+	
+	amount := 1.0;
+	work_count: s64;
+	while work_count < DISPATCHED_TASKS_COUNT
+	{
+		work: Work;
+		work.type = .Geometry;
+		work.geometry.positions = .{points_per_thread, geometry.positions.entries + work_count*points_per_thread};
+		work.geometry.normals   = .{points_per_thread, geometry.normals\ .entries + work_count*points_per_thread};
+		work.geometry.amount = amount;
+		
+		add_work(work);
+
+		amount += 1.0;
+		
+		work_count += 1;
+	}
+
+	// NOTE: working out the rest
+	if work_count*points_per_thread < count
+	{
+		offset := work_count*points_per_thread;
+
+		work: Work;
+		work.type = .Geometry;
+		work.geometry.positions = .{count - offset, geometry.positions.entries + offset};
+		work.geometry.normals   = .{count - offset, geometry.normals\ .entries + offset};
+		work.geometry.amount = amount;
+		
+		add_work(work);
+		
+		DISPATCHED_TASKS_COUNT += 1;
+	}
+
+	COMPLETED_TASKS_COUNT = 0;
+
 	FREE(.Temp);
+}
+
+#program_export
+check_if_work_done :: ()->bool #c_call
+{
+	push_context,defer_pop CONTEXT;
+	
+	assert(INITTED == true);
+
+	//
+	// work_count: s64 = 0;
+	// while work_count < DISPATCHED_TASKS_COUNT
+	// {
+		for *work_per_thread: get_completed_work()
+		{
+			count := work_per_thread.count;
+			
+			COMPLETED_TASKS_COUNT += work_per_thread.count;			
+		}
+		
+		FREE(.Temp);
+	// }
+	return COMPLETED_TASKS_COUNT >= DISPATCHED_TASKS_COUNT;
+
+	// FREE(.Temp);
 }
 
 /////////////////////////////

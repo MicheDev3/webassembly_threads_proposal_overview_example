@@ -13,6 +13,9 @@ Build Parameters:
 
 e.g: `jai jai/build.jai - -platform wasm`
 
+more complete: `jai jai/build.jai - -internal -platform wasm -wasm-compiler-path "W:\freelance\polygonjs\wabt\1.0.37\bin\wat2wasm.exe" -wasm-nr-pages 1000 -max-thread-count 32`
+or for linux: `jai jai/build.jai - -internal -platform wasm -wasm-compiler-path "/home/gui/Downloads/wabt-1.0.37-ubuntu-20.04/wabt-1.0.37/bin/wat2wasm" -wasm-nr-pages 1000 -max-thread-count 24`
+
 NOTE: Linux is not currently implemented
 
 # Wasm
