@@ -276,6 +276,64 @@ APP_JS_FILE_CONTENT :: #string DONE
 
 import { prepare_wasm_app } from "/js/common.js";
 
+let app;
+let dispatchButton;
+let closeButton;
+
+document.addEventListener('DOMContentLoaded', onDocumentLoaded);
+
+function onDocumentLoaded(){
+    console.log("onDocumentLoaded");
+    // const startButton = document.getElementById('start-button');
+    dispatchButton = document.getElementById('dispatch-button');
+    closeButton = document.getElementById('close-button');
+
+    // add events
+    // startButton.addEventListener('click', startThreads)
+    dispatchButton.addEventListener('click', dispatchWork);
+    closeButton.addEventListener('click', closeThreads);
+
+    load_wasm_binary();
+}
+
+function dispatchWork(){
+
+	const isWorkDoneInt = app.exports.check_if_work_done();
+	const isWorkDone = Boolean(isWorkDoneInt);
+	console.log("isWorkDone:", isWorkDone);
+	if (isWorkDone == false) {
+		console.log("cannot dispatch, work is not done");
+		return;
+	}
+
+	app.exports.dispatch_work();
+	disableDispatchButton();
+
+	requestAnimationFrame(checkIfWorkIsDone);
+}
+function closeThreads(){
+}
+
+function checkIfWorkIsDone(){
+	const isWorkDoneInt = app.exports.check_if_work_done();
+	const isWorkDone = Boolean(isWorkDoneInt);
+
+	if(isWorkDone) {
+		enableDispatchButton();
+		return;
+	}
+
+	requestAnimationFrame(checkIfWorkIsDone);
+}
+
+function disableDispatchButton() {
+	dispatchButton.classList.add('disabled');
+}
+
+function enableDispatchButton() {
+	dispatchButton.classList.remove('disabled');
+}
+
 async function load_wasm_binary()
 {
 	if (window.crossOriginIsolated)
@@ -313,7 +371,7 @@ async function load_wasm_binary()
 						memory: memory
 					}
 				};
-				const app = prepare_wasm_app(modules, imports, total_stack_size);
+				app = prepare_wasm_app(modules, imports, total_stack_size);
 				app.exports.init(cpuCountB);
 				
 				for (let i = 1; i < cpuCount; i++)
@@ -345,7 +403,7 @@ async function load_wasm_binary()
 	}
 }
 
-load_wasm_binary();
+
 
 DONE;
 
