@@ -9,6 +9,25 @@
 
 
 /////////////////////////////
+// Constants
+/////////////////////////////
+
+POINTS_COUNT      :: 200; //100004;
+POINTS_PER_THREAD :: 5;
+
+// WORKER_REQUEST_TYPE
+DISPATCH_WORK   :: 1;
+CHECK_IF_DONE   :: 2;
+
+// WORKER_RESPONSE_TYPE
+WORK_DISPATCHED :: 0;
+PROCESSING_WORK :: 1;
+WORK_COMPLETED  :: 2;
+
+/////////////////////////////
+
+
+/////////////////////////////
 // Globals
 /////////////////////////////
 
@@ -16,6 +35,17 @@ INITTED: bool = false;
 MAIN_ARENA_ALLOCATOR: ArenaAllocator;
 
 CONTEXT: #Context;
+
+GEOMETRY: Geometry;
+DISPATCHED_TASKS_COUNT :s64;
+COMPLETED_TASKS_COUNT  :s64;
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Enums
+/////////////////////////////
 
 /////////////////////////////
 
@@ -47,8 +77,6 @@ carve_memory_block :: (
 	worker_memory_size: s64,
 	temp_memory_size: s64
 ) -> MemoryBlock #foreign;
-
-notify_main_thread_flow_initialized    :: () #foreign "wasm_notify_main_thread_flow_initialized";
 
 /////////////////////////////
 
@@ -100,127 +128,99 @@ run_worker :: (index: s64) #c_call
 	ctx: #Context;
 	push_context,defer_pop ctx;
 
-	assert(INITTED == true);
 	assert(index >= 0 && index <= MAX_THREAD_COUNT-1);
+	
+	// TODO: Will llvm in optimise complain about this?
+	while INITTED == false { sleep(100); }
 
-	print("run worker\n");
 	run_thread(index);
 }
 
 #program_export
-run_worker_control_flow :: (index: s64) #c_call
-{
-	ctx: #Context;
-	push_context,defer_pop ctx;
-
-	assert(INITTED == true);
-	assert(index >= 0 && index <= MAX_THREAD_COUNT-1);
-
-	// run_thread(index);
-
-	print("sleep start\n");
-	sleep(100);
-	print("sleep done\n");
-	notify_main_thread_flow_initialized();
-}
-
-DISPATCHED_TASKS_COUNT:s64;
-COMPLETED_TASKS_COUNT:s64;
-geometry: Geometry;
-points_per_thread := 5;
-
-#program_export
-dispatch_work :: () #c_call
+run_worker_control_flow :: (type: s64) -> s64 #c_call
 {
 	push_context,defer_pop CONTEXT;
-	
+
 	assert(INITTED == true);
 
-	count := 200;//100004;
-	
-	init_geometry(*geometry, count);
-	
-	DISPATCHED_TASKS_COUNT = (count / points_per_thread);
-	
-	amount := 1.0;
-	work_count: s64;
-	while work_count < DISPATCHED_TASKS_COUNT
+	result := -1;
+	if type ==
 	{
-		work: Work;
-		work.type = .Geometry;
-		work.geometry.positions = .{points_per_thread, geometry.positions.entries + work_count*points_per_thread};
-		work.geometry.normals   = .{points_per_thread, geometry.normals\ .entries + work_count*points_per_thread};
-		work.geometry.amount = amount;
-		
-		add_work(work);
-
-		amount += 1.0;
-		
-		work_count += 1;
-	}
-
-	// NOTE: working out the rest
-	if work_count*points_per_thread < count
-	{
-		offset := work_count*points_per_thread;
-
-		work: Work;
-		work.type = .Geometry;
-		work.geometry.positions = .{count - offset, geometry.positions.entries + offset};
-		work.geometry.normals   = .{count - offset, geometry.normals\ .entries + offset};
-		work.geometry.amount = amount;
-		
-		add_work(work);
-		
-		DISPATCHED_TASKS_COUNT += 1;
-	}
-
-	COMPLETED_TASKS_COUNT = 0;
-
-	FREE(.Temp);
-}
-
-#program_export
-check_if_work_done :: ()->bool #c_call
-{
-	push_context,defer_pop CONTEXT;
-	
-	assert(INITTED == true);
-
-	//
-	// work_count: s64 = 0;
-	// while work_count < DISPATCHED_TASKS_COUNT
-	// {
-		for *work_per_thread: get_completed_work()
+		case DISPATCH_WORK;
 		{
-			count := work_per_thread.count;
+			init_geometry(*GEOMETRY, POINTS_COUNT);
 			
-			COMPLETED_TASKS_COUNT += work_per_thread.count;			
-		}
-		
-		FREE(.Temp);
-	// }
-	print("COMPLETED_TASKS_COUNT:%\n", COMPLETED_TASKS_COUNT);
-	work_is_done := COMPLETED_TASKS_COUNT >= DISPATCHED_TASKS_COUNT;
-	if work_is_done {
-		print("WORK IS DONE\n");
-
-		amount := 0.0;
-		for geometry.positions
-		{
-			if it_index % points_per_thread == 0
+			COMPLETED_TASKS_COUNT  = 0;
+			DISPATCHED_TASKS_COUNT = (POINTS_COUNT / POINTS_PER_THREAD);
+			
+			amount := 1.0;
+			work_count: s64;
+			while work_count < DISPATCHED_TASKS_COUNT
 			{
-				amount += 1;
+				work: Work;
+				work.type = .Geometry;
+				work.geometry.positions = .{POINTS_PER_THREAD, GEOMETRY.positions.entries + work_count*POINTS_PER_THREAD};
+				work.geometry.normals   = .{POINTS_PER_THREAD, GEOMETRY.normals\ .entries + work_count*POINTS_PER_THREAD};
+				work.geometry.amount = amount;
+				
+				add_work(work);
+				
+				amount += 1.0;
+				
+				work_count += 1;
 			}
 			
-			normal   := geometry.normals[it_index];
-			position := normal*amount;
-			assert(it == position);
+			// NOTE: working out the rest
+			if work_count*POINTS_PER_THREAD < POINTS_COUNT
+			{
+				offset := work_count*POINTS_PER_THREAD;
+				
+				work: Work;
+				work.type = .Geometry;
+				work.geometry.positions = .{POINTS_COUNT - offset, GEOMETRY.positions.entries + offset};
+				work.geometry.normals   = .{POINTS_COUNT - offset, GEOMETRY.normals\ .entries + offset};
+				work.geometry.amount = amount;
+				
+				add_work(work);
+				
+				DISPATCHED_TASKS_COUNT += 1;
+			}
+			
+			result = WORK_DISPATCHED;		
 		}
+		case CHECK_IF_DONE;
+		{
+			result = PROCESSING_WORK;
+			for *work_per_thread: get_completed_work()
+			{
+				COMPLETED_TASKS_COUNT += work_per_thread.count;
+			}
+			
+			work_is_done := COMPLETED_TASKS_COUNT >= DISPATCHED_TASKS_COUNT;
+			print("COMPLETED_TASKS_COUNT:%\n", COMPLETED_TASKS_COUNT);
+			if work_is_done {
+				amount := 0.0;
+				for GEOMETRY.positions
+				{
+					if it_index % POINTS_PER_THREAD == 0
+					{
+						amount += 1;
+					}
+					
+					normal   := GEOMETRY.normals[it_index];
+					position := normal*amount;
+					assert(it == position);
+				}
+				
+				result = WORK_COMPLETED;
+			}
+		}
+		case; { assert(false, "invalid control flow type"); }
 	}
-	return work_is_done;
+	
+	FREE(.Temp);
 
-	// FREE(.Temp);
+	return result;
 }
 
 /////////////////////////////

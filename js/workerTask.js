@@ -8,4 +8,3 @@ onmessage = async function(message)
 	const app = prepare_wasm_app({modules, imports, stack_pointer});
 	app.exports.run_worker(BigInt(index));
 }
-

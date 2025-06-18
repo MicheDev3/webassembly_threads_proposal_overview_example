@@ -205,6 +205,7 @@ run_thread :: (index: s64)
 
 	}
 
+	// TODO: Will llvm in optimise complain about this?
 	while !THREAD_GROUP.shutdown
 	{
 		wait(*thread.semaphore);

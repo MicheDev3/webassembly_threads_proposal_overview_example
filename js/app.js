@@ -1,7 +1,7 @@
 
 import { prepare_wasm_app } from "/js/common.js";
 import { GLOBALS } from "/js/globals.js";
-import { WORKER_MESSAGE_TYPE } from "/js/workerControlFlowType.js";
+import { WORKER_REQUEST_TYPE } from "/js/workerControlFlowType.js";
 
 let app;
 let dispatchButton;
@@ -67,59 +67,45 @@ async function load_wasm_binary()
 				const cpuCountB = BigInt(cpuCount);
 	
 				const total_stack_size = BigInt(GLOBALS.STACK_SIZE);
-				const stack_size = total_stack_size/BigInt(cpuCount);
-				const imports =  {
-					env: {
-						memory: memory
-					}
-				};
-				app = prepare_wasm_app({modules, imports, stack_pointer:total_stack_size});
-				app.exports.init(cpuCountB);
-				
-				let lastStackPointer=-1;
-				function workerData(index){
-					const data = 
-					{
-						index,
-						modules: [atomicModule, appModule],
-						imports: {env: {memory: memory}},
-						stack_pointer: total_stack_size - BigInt(index+1)*stack_size,
-					}
-					if (lastStackPointer > 0 ) {
-						const delta = data.stack_pointer-lastStackPointer;
-						// console.log(data.index, data.stack_pointer, delta);
-					}
-					lastStackPointer = data.stack_pointer;
-					return data;
-				}
+				const stack_size = total_stack_size/cpuCountB;
+				const imports =  {env: {memory: memory}};
 
 				// create worker for control flow
-				function createControlFlowWorker(){
-					const worker = new Worker("/js/workerControlFlow.js", { type: "module" });
-					const data = workerData(0);
-					data.type = WORKER_MESSAGE_TYPE.INSTANTIATE_WASM;
-					worker.postMessage(data);
-					worker.onmessage = (event) => {
-						console.log('control flow worker sent event to main thread (we are in main thread)', event);
-					}
-					worker.onerror   = (err)=>{ console.log('something wrong happened with the worker'); console.error(err); }
-
-					dispatchButton.addEventListener('click', ()=>{
-						const dispatchData = {
-							type:WORKER_MESSAGE_TYPE.DISPATCH_WORK
-						};
-						worker.postMessage(dispatchData);
-					});
+				const worker = new Worker("/js/workerControlFlow.js", { type: "module" });
+				const data =
+				{
+					modules: [atomicModule, appModule],
+					imports: {env: {memory: memory}},
+					stack_pointer: total_stack_size,
+					type: WORKER_REQUEST_TYPE.INSTANTIATE_WASM,
+					cpu_count: cpuCountB
 				}
-				createControlFlowWorker();
+				
+				worker.postMessage(data);
+				worker.onmessage = (event) => {
+					console.log('control flow worker sent event to main thread (we are in main thread)', event);
+				}
+				worker.onerror   = (err)=>{ console.log('something wrong happened with the worker'); console.error(err); }
+				
+				dispatchButton.addEventListener('click', ()=>{
+					const dispatchData = {
+						type:WORKER_REQUEST_TYPE.DISPATCH_WORK
+					};
+					worker.postMessage(dispatchData);
+				});
 
 				// create the workers that will process tasks 				
-				for (let i = 2; i < cpuCount; i++)
+				for (let i = 1; i < cpuCount; i++)
 				{
 					// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
 					const worker = new Worker("/js/workerTask.js", { type: "module" });
-
-					const data = workerData(i-1);
+					const data = 
+					{
+						index: i-1,
+						modules: [atomicModule, appModule],
+						imports: {env: {memory: memory}},
+						stack_pointer: total_stack_size - BigInt(i)*stack_size,
+					};
 					worker.postMessage(data);
 					worker.onmessage = (event) => {
 						console.error('task worker sent event to main thread (we are in main thread):', event);

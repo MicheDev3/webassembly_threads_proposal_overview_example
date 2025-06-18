@@ -1,14 +1,16 @@
 
 import { prepare_wasm_app } from "/js/common.js";
-import { WORKER_MESSAGE_TYPE } from "/js/workerControlFlowType.js";
+import { WORKER_REQUEST_TYPE, WORKER_RESPONSE_TYPE } from "/js/workerControlFlowType.js";
+
+let FRAME_REQUEST;
 
 onmessage = async function(message)
 {
     switch(message.data.type){
-        case WORKER_MESSAGE_TYPE.INSTANTIATE_WASM: {
+        case WORKER_REQUEST_TYPE.INSTANTIATE_WASM: {
             return instantiateWasm(message);
         }
-        case WORKER_MESSAGE_TYPE.DISPATCH_WORK: {
+        case WORKER_REQUEST_TYPE.DISPATCH_WORK: {
             return dispatchWork(message);
         }
         default: {
@@ -20,14 +22,10 @@ onmessage = async function(message)
 
 let app = null;
 function instantiateWasm(message){
-	const { index, modules, imports, stack_pointer } = message.data;
+	const { modules, imports, stack_pointer, cpu_count} = message.data;
 
-    app = prepare_wasm_app({modules, imports, stack_pointer, wasm_notify_main_thread_flow_initialized});
-	app.exports.run_worker_control_flow(BigInt(index));
-}
-
-function wasm_notify_main_thread_flow_initialized(){
-    postMessage({status:"not so well send help"});
+    app = prepare_wasm_app({modules, imports, stack_pointer});
+	app.exports.init(cpu_count);
 }
 
 function dispatchWork(message){
@@ -35,18 +33,18 @@ function dispatchWork(message){
         console.error('wasm not yet instantiated');
         return;
     }
-    const isWorkDoneInt = app.exports.check_if_work_done();
-	const isWorkDone = Boolean(isWorkDoneInt);
-	console.log("isWorkDone:", isWorkDone);
-	if (isWorkDone == false) {
-		console.log("cannot dispatch, work is not done");
-		return;
+
+	const result = app.exports.run_worker_control_flow(WORKER_REQUEST_TYPE.DISPATCH_WORK);
+	switch(result){
+		case WORKER_RESPONSE_TYPE.WORK_DISPATCHED:{
+			FRAME_REQUEST = requestAnimationFrame(checkIfWorkIsDone);
+			cancelAnimationFrame(FRAME_REQUEST);
+			return;
+		}
+		default:{
+			console.error('something went wrong in "run_worker_control_flow(DISPATCH_WORK)" aborting');
+		}
 	}
-
-	app.exports.dispatch_work();
-	// disableDispatchButton();
-
-	requestAnimationFrame(checkIfWorkIsDone);
 }
 
 function checkIfWorkIsDone(){
@@ -54,14 +52,18 @@ function checkIfWorkIsDone(){
         console.error('wasm not yet instantiated');
         return;
     }
-	const isWorkDoneInt = app.exports.check_if_work_done();
-	const isWorkDone = Boolean(isWorkDoneInt);
-    // console.log({isWorkDone});
-
-	if(isWorkDone) {
-		// enableDispatchButton();
-		return;
+    
+	const result = app.exports.run_worker_control_flow(WORKER_REQUEST_TYPE.CHECK_IF_DONE);
+	console.log('"run_worker_control_flow(CHECK_IF_DONE)" result:', result);
+	switch(result){
+		case WORKER_RESPONSE_TYPE.PROCESSING_WORK:{
+			FRAME_REQUEST = requestAnimationFrame(checkIfWorkIsDone);
+		}
+		case WORKER_RESPONSE_TYPE.WORK_COMPLETED:{
+			console.log('work completed');
+		}
+		default:{
+			console.error('something went wrong in "run_worker_control_flow(CHECK_IF_DONE)" aborting');
+		}
 	}
-
-	requestAnimationFrame(checkIfWorkIsDone);
 }
