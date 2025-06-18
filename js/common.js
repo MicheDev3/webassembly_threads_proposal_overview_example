@@ -64,8 +64,25 @@ function jaiTojsString(buffer, pointer, length)
 	return decoder.decode(tempBuffer);
 }
 
-export function prepare_wasm_app(modules, imports, stack_pointer)
+function DEFAULT_WASM_NOTIFY(){
+	console.log('notify_main_thread_flow_initialized')
+}
+export function prepare_wasm_app(options)
 {
+	const {modules, imports, stack_pointer} = options;
+	if(stack_pointer==null){
+		throw new Error('stack_pointer is not provided');
+	}
+
+	let wasm_notify_main_thread_flow_initialized = options.wasm_notify_main_thread_flow_initialized;
+	if(wasm_notify_main_thread_flow_initialized == null) {
+		wasm_notify_main_thread_flow_initialized = DEFAULT_WASM_NOTIFY
+	} 
+	// console.log({wasm_notify_main_thread_flow_initialized});
+	if(wasm_notify_main_thread_flow_initialized==null){
+		throw new Error('wasm_notify_main_thread_flow_initialized not provided');
+	}
+
 	const memory = imports["env"]["memory"];
 	const atomics = new WebAssembly.Instance(modules[0], imports);
 	const result  = new WebAssembly.Instance(modules[1],
@@ -92,6 +109,7 @@ export function prepare_wasm_app(modules, imports, stack_pointer)
 					const value = jaiTojsString(memory.buffer, data, count);
 					writeToConsoleLog(value, toStandardError);
 				},
+				wasm_notify_main_thread_flow_initialized,
 				wasm_debug_break: () => { debugger },
 				wasm_sleep:  atomics.exports.sleep,
 				wasm_wake:   atomics.exports.wake,

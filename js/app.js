@@ -1,6 +1,6 @@
 
 import { prepare_wasm_app } from "/js/common.js";
-import { GLOBALS } from "/js/globals.js"
+import { GLOBALS } from "/js/globals.js";
 
 let app;
 let dispatchButton;
@@ -71,7 +71,7 @@ async function load_wasm_binary()
 				WebAssembly.compileStreaming(fetch(atomicUri)),
 				WebAssembly.compileStreaming(fetch(appUri  )),
 			]
-		).then ( async (modules) => 
+		).then ( (modules) => 
 			{
 				const atomicModule = modules[0];
 				const appModule    = modules[1];
@@ -97,29 +97,54 @@ async function load_wasm_binary()
 						memory: memory
 					}
 				};
-				app = prepare_wasm_app(modules, imports, total_stack_size);
+				app = prepare_wasm_app({modules, imports, stack_pointer:total_stack_size});
 				app.exports.init(cpuCountB);
 				
-				for (let i = 1; i < cpuCount; i++)
+				let lastStackPointer=-1;
+				function workerData(index){
+					const data = 
+					{
+						index,
+						modules: [atomicModule, appModule],
+						imports: {env: {memory: memory}},
+						stack_pointer: total_stack_size - BigInt(index+1)*stack_size,
+					}
+					if (lastStackPointer > 0 ) {
+						const delta = data.stack_pointer-lastStackPointer;
+						// console.log(data.index, data.stack_pointer, delta);
+					}
+					lastStackPointer = data.stack_pointer;
+					return data;
+				}
+
+				// create worker for control flow
+				function createControlFlowWorker(){
+					const worker = new Worker("/js/workerControlFlow.js", { type: "module" });
+					const data = workerData(0);
+					worker.postMessage(data);
+					worker.onmessage = (event) => {
+						console.log('control flow worker sent event to main thread (we are in main thread)', event);
+					}
+					worker.onerror   = (err)=>{ console.log('something wrong happened with the worker'); console.error(err); }
+				}
+				createControlFlowWorker();
+
+				// create the workers that will process tasks 				
+				for (let i = 2; i < cpuCount; i++)
 				{
 					// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
 					const worker = new Worker("/js/worker.js", { type: "module" });
-					new Promise(
-						(resolve) =>
-						{
-							const data = 
-							{
-								index: i-1,
-								modules: [atomicModule, appModule],
-								imports: {env: {memory: memory}},
-								stack_pointer: total_stack_size - BigInt(i)*stack_size,
-							}
-							worker.postMessage(data);
-							worker.onmessage = (event) => resolve(event.data);
-							worker.onerror   = (err)=>console.error(err);
-						}
-					)
+
+					const data = workerData(i-1);
+					worker.postMessage(data);
+					worker.onmessage = (event) => {
+						console.error('task worker sent event to main thread (we are in main thread):', event);
+					}
+					worker.onerror   = (err)=>{console.log('something wrong happened with the worker');console.error(err);}
 				}
+
+
+
 			}
 		).catch( (err)     => { console.error(err); } );
 	}

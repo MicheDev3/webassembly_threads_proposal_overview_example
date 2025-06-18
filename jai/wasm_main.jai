@@ -48,6 +48,8 @@ carve_memory_block :: (
 	temp_memory_size: s64
 ) -> MemoryBlock #foreign;
 
+notify_main_thread_flow_initialized    :: () #foreign "wasm_notify_main_thread_flow_initialized";
+
 /////////////////////////////
 
 
@@ -101,7 +103,25 @@ run_worker :: (index: s64) #c_call
 	assert(INITTED == true);
 	assert(index >= 0 && index <= MAX_THREAD_COUNT-1);
 
+	print("run worker\n");
 	run_thread(index);
+}
+
+#program_export
+run_worker_control_flow :: (index: s64) #c_call
+{
+	ctx: #Context;
+	push_context,defer_pop ctx;
+
+	assert(INITTED == true);
+	assert(index >= 0 && index <= MAX_THREAD_COUNT-1);
+
+	// run_thread(index);
+
+	print("sleep start\n");
+	sleep(100);
+	print("sleep done\n");
+	notify_main_thread_flow_initialized();
 }
 
 DISPATCHED_TASKS_COUNT:s64;
