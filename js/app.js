@@ -1,6 +1,7 @@
 
 import { prepare_wasm_app } from "/js/common.js";
 import { GLOBALS } from "/js/globals.js";
+import { WORKER_MESSAGE_TYPE } from "/js/workerControlFlowType.js";
 
 let app;
 let dispatchButton;
@@ -16,41 +17,16 @@ function onDocumentLoaded(){
 
     // add events
     // startButton.addEventListener('click', startThreads)
-    dispatchButton.addEventListener('click', dispatchWork);
+    // dispatchButton.addEventListener('click', dispatchWork);
     closeButton.addEventListener('click', closeThreads);
 
     load_wasm_binary();
 }
 
-function dispatchWork(){
 
-	const isWorkDoneInt = app.exports.check_if_work_done();
-	const isWorkDone = Boolean(isWorkDoneInt);
-	console.log("isWorkDone:", isWorkDone);
-	if (isWorkDone == false) {
-		console.log("cannot dispatch, work is not done");
-		return;
-	}
-
-	app.exports.dispatch_work();
-	disableDispatchButton();
-
-	requestAnimationFrame(checkIfWorkIsDone);
-}
 function closeThreads(){
 }
 
-function checkIfWorkIsDone(){
-	const isWorkDoneInt = app.exports.check_if_work_done();
-	const isWorkDone = Boolean(isWorkDoneInt);
-
-	if(isWorkDone) {
-		enableDispatchButton();
-		return;
-	}
-
-	requestAnimationFrame(checkIfWorkIsDone);
-}
 
 function disableDispatchButton() {
 	dispatchButton.classList.add('disabled');
@@ -121,11 +97,19 @@ async function load_wasm_binary()
 				function createControlFlowWorker(){
 					const worker = new Worker("/js/workerControlFlow.js", { type: "module" });
 					const data = workerData(0);
+					data.type = WORKER_MESSAGE_TYPE.INSTANTIATE_WASM;
 					worker.postMessage(data);
 					worker.onmessage = (event) => {
 						console.log('control flow worker sent event to main thread (we are in main thread)', event);
 					}
 					worker.onerror   = (err)=>{ console.log('something wrong happened with the worker'); console.error(err); }
+
+					dispatchButton.addEventListener('click', ()=>{
+						const dispatchData = {
+							type:WORKER_MESSAGE_TYPE.DISPATCH_WORK
+						};
+						worker.postMessage(dispatchData);
+					});
 				}
 				createControlFlowWorker();
 
@@ -133,7 +117,7 @@ async function load_wasm_binary()
 				for (let i = 2; i < cpuCount; i++)
 				{
 					// https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
-					const worker = new Worker("/js/worker.js", { type: "module" });
+					const worker = new Worker("/js/workerTask.js", { type: "module" });
 
 					const data = workerData(i-1);
 					worker.postMessage(data);

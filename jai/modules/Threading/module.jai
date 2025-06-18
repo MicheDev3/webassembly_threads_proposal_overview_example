@@ -271,7 +271,7 @@ PUSH_LOCK(*thread.completed_mutex, #code
 });
 		}
 		
-		write_message("Thread(%): completed % works\n", thread.index, count);
+		// write_message("Thread(%): completed % works\n", thread.index, count);
 	}
 	
 	return result;

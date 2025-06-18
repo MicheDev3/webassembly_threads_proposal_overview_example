@@ -126,6 +126,8 @@ run_worker_control_flow :: (index: s64) #c_call
 
 DISPATCHED_TASKS_COUNT:s64;
 COMPLETED_TASKS_COUNT:s64;
+geometry: Geometry;
+points_per_thread := 5;
 
 #program_export
 dispatch_work :: () #c_call
@@ -134,10 +136,8 @@ dispatch_work :: () #c_call
 	
 	assert(INITTED == true);
 
-	count := 100004;
-	points_per_thread := 5;
+	count := 200;//100004;
 	
-	geometry: Geometry;
 	init_geometry(*geometry, count);
 	
 	DISPATCHED_TASKS_COUNT = (count / points_per_thread);
@@ -200,7 +200,25 @@ check_if_work_done :: ()->bool #c_call
 		
 		FREE(.Temp);
 	// }
-	return COMPLETED_TASKS_COUNT >= DISPATCHED_TASKS_COUNT;
+	print("COMPLETED_TASKS_COUNT:%\n", COMPLETED_TASKS_COUNT);
+	work_is_done := COMPLETED_TASKS_COUNT >= DISPATCHED_TASKS_COUNT;
+	if work_is_done {
+		print("WORK IS DONE\n");
+
+		amount := 0.0;
+		for geometry.positions
+		{
+			if it_index % points_per_thread == 0
+			{
+				amount += 1;
+			}
+			
+			normal   := geometry.normals[it_index];
+			position := normal*amount;
+			assert(it == position);
+		}
+	}
+	return work_is_done;
 
 	// FREE(.Temp);
 }
