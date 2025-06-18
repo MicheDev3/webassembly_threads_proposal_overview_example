@@ -12,7 +12,7 @@
 // Constants
 /////////////////////////////
 
-POINTS_COUNT      :: 200; //100004;
+POINTS_COUNT      :: 10004;//100004;
 POINTS_PER_THREAD :: 5;
 
 // WORKER_REQUEST_TYPE
@@ -197,8 +197,8 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 			}
 			
 			work_is_done := COMPLETED_TASKS_COUNT >= DISPATCHED_TASKS_COUNT;
-			print("COMPLETED_TASKS_COUNT:%\n", COMPLETED_TASKS_COUNT);
 			if work_is_done {
+				print("COMPLETED_TASKS_COUNT:%\n", COMPLETED_TASKS_COUNT,, allocation=allocation(.Temp));
 				amount := 0.0;
 				for GEOMETRY.positions
 				{

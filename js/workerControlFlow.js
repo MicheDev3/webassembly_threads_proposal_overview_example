@@ -38,11 +38,11 @@ function dispatchWork(message){
 	switch(result){
 		case WORKER_RESPONSE_TYPE.WORK_DISPATCHED:{
 			FRAME_REQUEST = requestAnimationFrame(checkIfWorkIsDone);
-			cancelAnimationFrame(FRAME_REQUEST);
 			return;
 		}
 		default:{
 			console.error('something went wrong in "run_worker_control_flow(DISPATCH_WORK)" aborting');
+			return;
 		}
 	}
 }
@@ -58,12 +58,15 @@ function checkIfWorkIsDone(){
 	switch(result){
 		case WORKER_RESPONSE_TYPE.PROCESSING_WORK:{
 			FRAME_REQUEST = requestAnimationFrame(checkIfWorkIsDone);
+			return;
 		}
 		case WORKER_RESPONSE_TYPE.WORK_COMPLETED:{
 			console.log('work completed');
+			return;
 		}
 		default:{
 			console.error('something went wrong in "run_worker_control_flow(CHECK_IF_DONE)" aborting');
+			return;
 		}
 	}
 }
