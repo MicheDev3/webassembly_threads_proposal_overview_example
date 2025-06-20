@@ -12,8 +12,7 @@
 // Constants
 /////////////////////////////
 
-// POINTS_COUNT      :: 1_000_004;
-POINTS_COUNT      :: 100_004;
+POINTS_COUNT      :: 1_000_004;
 POINTS_PER_THREAD :: 5;
 
 // WORKER_REQUEST_TYPE
@@ -238,7 +237,7 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 	Work             =Work,
 	MAX_THREAD_COUNT =MAX_THREAD_COUNT,
 	CACHE_LINE_SIZE  =CACHE_LINE_SIZE,
-	LOGGING          =false,
+	LOGGING          =INTERNAL,
 	ThreadProc       =thread_proc,
 );
 
