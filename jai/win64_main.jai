@@ -136,6 +136,8 @@ CloseHandle             :: (handle: *void)                                      
 
 init_arena :: inline (arena: *ArenaAllocator, total_size: s64, temp_size: s64)
 {
+	assert(total_size > temp_size);
+	
 	block := VirtualAlloc(null, cast(u64)total_size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 	assert(block != null);
 	
@@ -211,7 +213,7 @@ main :: () -> s32
 	}
 	//}
 
-	count := 100004;
+	count := 1_000_004;
 	points_per_thread := 5;
 	
 	geometry: Geometry;
@@ -251,7 +253,7 @@ main :: () -> s32
 		
 		iterations += 1;
 	}
-
+	
 	work_count = 0;
 	while work_count < iterations
 	{
@@ -279,6 +281,8 @@ main :: () -> s32
 		position := normal*amount;
 		assert(it == position);
 	}
+
+	print("Work completed\n",, allocation=allocation(.Temp));
 	
 	return 0;
 }
@@ -301,7 +305,7 @@ main :: () -> s32
 	Work             =Work,
 	MAX_THREAD_COUNT =MAX_THREAD_COUNT,
 	CACHE_LINE_SIZE  =CACHE_LINE_SIZE,
-	LOGGING          =INTERNAL,
+	LOGGING          =false,
 	ThreadProc       =thread_proc
 );
 

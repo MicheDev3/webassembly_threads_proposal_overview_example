@@ -69,15 +69,15 @@ ArenaAllocator :: struct
 
 operator == :: inline (lhs: MemoryArena, rhs: MemoryArena) -> bool
 {
-    result := (
-        lhs.base == rhs.base
-        &&
-        lhs.size == rhs.size
-        &&
-        lhs.used == rhs.used
-    );
-    
-    return result;
+	result := (
+		lhs.base == rhs.base
+		&&
+		lhs.size == rhs.size
+		&&
+		lhs.used == rhs.used
+	);
+	
+	return result;
 }
 
 #scope_export
@@ -137,15 +137,15 @@ allocator_proc ::
 		case .ALLOCATE;
 		{
 			arena: *MemoryArena;
-            if context.allocation.arena ==
+			if context.allocation.arena ==
 			{
 				case .Temp; { arena = *allocator.temp; }
 				case .Main; { arena = *allocator.main; }
 			}
-
+			
 			alignment := context.allocation.alignment;
 			// NOTE: Makinkg sure alignment is a power of two
-            assert((alignment & ~(alignment - 1)) == alignment);
+			assert((alignment & ~(alignment - 1)) == alignment);
 			assert(alignment <= 128);
 			
 			result := arena.base + arena.used;
@@ -157,7 +157,7 @@ allocator_proc ::
 		case .FREE;
 		{
 			arena: *MemoryArena;
-            if context.allocation.arena ==
+			if context.allocation.arena ==
 			{
 				case .Temp; { arena = *allocator.temp; }
 				case .Main; { arena = *allocator.main; }
@@ -201,7 +201,7 @@ allocation :: inline (arena: ArenaType, alignment: s64 = 4) -> Allocation
 	result.alignment = alignment;
 	
 	return result;
-} 
+}
 
 /////////////////////////////
 

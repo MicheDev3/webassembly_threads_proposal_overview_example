@@ -127,11 +127,8 @@ WAT_ATOMIC_FILE_CONTENT :: #string DONE
 			        (drop
 			        	(call $wait 
 			        		(local.get $address)
-			        		(i64.const  0)
-			        		;; TODO: for some reason when multiple threads lock a mutex
-			        		;; they aren't all unlock so for now just setting a 5 seconds
-			        		;;  wait. Understand why this is happening
-			        		(i64.const 5000000)
+			        		(i64.const  1)
+			        		(i64.const -1)
 			        	)
 		        	)
 					
@@ -227,8 +224,8 @@ Win64Options :: struct
 	backend: Backend;
 	
 	main_memory_size   = #run MEBIBYTES(100);
-	temp_memory_size   = #run MEBIBYTES(5);
-	thread_memory_size = #run MEBIBYTES(10);
+	temp_memory_size   = #run MEBIBYTES(50);
+	thread_memory_size = #run MEBIBYTES(100);
 	
 	backend = .X64;
 }
@@ -251,9 +248,9 @@ WasmOptions :: struct
 	wat_\output_path = "wat";
 	wasm_output_path = "public";
 	
-	main_nr_pages   = 1000;
-	temp_nr_pages   = 10;
-	worker_nr_pages = 20;
+	main_nr_pages   = 10000;
+	temp_nr_pages   = 200;
+	worker_nr_pages = 500;
 }
 
 WatToWasmTarget :: struct

@@ -34,6 +34,7 @@ function dispatchWork(message){
         return;
     }
 
+	console.log('"run_worker_control_flow(DISPATCH_WORK)"');
 	const result = app.exports.run_worker_control_flow(WORKER_REQUEST_TYPE.DISPATCH_WORK);
 	switch(result){
 		case WORKER_RESPONSE_TYPE.WORK_DISPATCHED:{
@@ -54,7 +55,6 @@ function checkIfWorkIsDone(){
     }
     
 	const result = app.exports.run_worker_control_flow(WORKER_REQUEST_TYPE.CHECK_IF_DONE);
-	console.log('"run_worker_control_flow(CHECK_IF_DONE)" result:', result);
 	switch(result){
 		case WORKER_RESPONSE_TYPE.PROCESSING_WORK:{
 			FRAME_REQUEST = requestAnimationFrame(checkIfWorkIsDone);
