@@ -7,4 +7,5 @@ globals.js
 *.exe
 *.pdb
 *.rdi
+*.rdbg
 *.o

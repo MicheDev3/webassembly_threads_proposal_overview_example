@@ -54,6 +54,7 @@ function checkIfWorkIsDone(){
         return;
     }
     
+	console.log('"run_worker_control_flow(CHECK_IF_DONE)"');
 	const result = app.exports.run_worker_control_flow(WORKER_REQUEST_TYPE.CHECK_IF_DONE);
 	switch(result){
 		case WORKER_RESPONSE_TYPE.PROCESSING_WORK:{

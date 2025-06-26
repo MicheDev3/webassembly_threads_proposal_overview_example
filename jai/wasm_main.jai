@@ -119,6 +119,8 @@ init :: (thread_count: s64) #c_call
 		init_thread(it, thread_arena_allocator);
 	}
 	
+	init_geometry(*GEOMETRY, POINTS_COUNT);
+	
 	INITTED = true;
 }
 
@@ -148,7 +150,7 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 	{
 		case DISPATCH_WORK;
 		{
-			init_geometry(*GEOMETRY, POINTS_COUNT);
+			reset_geometry(*GEOMETRY);
 			
 			COMPLETED_TASKS_COUNT  = 0;
 			DISPATCHED_TASKS_COUNT = (POINTS_COUNT / POINTS_PER_THREAD);
@@ -237,7 +239,7 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 	Work             =Work,
 	MAX_THREAD_COUNT =MAX_THREAD_COUNT,
 	CACHE_LINE_SIZE  =CACHE_LINE_SIZE,
-	LOGGING          =INTERNAL,
+	LOGGING          =false,
 	ThreadProc       =thread_proc,
 );
 

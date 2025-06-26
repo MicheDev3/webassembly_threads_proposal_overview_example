@@ -129,7 +129,7 @@ runtime_support_assertion_failed :: (loc: Source_Code_Location, message: string)
 runtime_support_default_logger :: (message: string, data: *void, info: Log_Info)
 {
 	if !message then return;
-
+	
 	lock(*CONSOLE_LOCK);
 	defer unlock(*CONSOLE_LOCK);
 	
@@ -327,8 +327,6 @@ write_strings_unsynchronized :: (strings: ..string, to_standard_error := false) 
 
 write_string  :: (s: string, to_standard_error := false) #no_context #compiler
 {
-	one_time_init(*SYNC_INITTED, init_synchronization());
-
 	lock(*CONSOLE_LOCK);
 	defer unlock(*CONSOLE_LOCK);
 	
@@ -337,8 +335,6 @@ write_string  :: (s: string, to_standard_error := false) #no_context #compiler
 
 write_strings :: (strings: ..string, to_standard_error := false) #no_context #compiler
 {
-	one_time_init(*SYNC_INITTED, init_synchronization());
-
 	lock(*CONSOLE_LOCK);
 	defer unlock(*CONSOLE_LOCK);
 	
@@ -443,6 +439,7 @@ set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
 	#program_export "main"
 	__system_entry_point :: (argc: s32, argv: **u8) -> s32 #c_call
 	{
+		init_synchronization();
 		__jai_runtime_init(argc, argv);
 		
 		push_context first_thread_context
@@ -618,17 +615,26 @@ else
 
 }
 
-write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
+init_synchronization :: () #no_context
 {
-	written: u32;
-    handle := ifx to_standard_error then STANDARD_ERROR else STANDARD_OUTPUT;
-    status := WriteFile(handle, s.data, cast(u32) s.count, *written, null);
+
+#if USE_TICKET_MUTEX
+{
+}
+else
+{
+	InitializeCriticalSection(*CONSOLE_LOCK);
+}
+
+    STD_OUTPUT_HANDLE :: -11;
+    STD_ERROR_HANDLE  :: -12;
+    STANDARD_OUTPUT = GetStdHandle(STD_OUTPUT_HANDLE);
+    STANDARD_ERROR  = GetStdHandle(STD_ERROR_HANDLE);
 }
 
 #scope_file
 
 CONSOLE_LOCK: Mutex;
-SYNC_INITTED: s32 = 0;
 
 STANDARD_OUTPUT: *void;
 STANDARD_ERROR:  *void;
@@ -687,53 +693,9 @@ ReleaseSemaphore          :: (hSemaphore: *void, lReleaseCount: s32, lpPreviousC
 CloseHandle               :: (handle: *void)                                                                                    -> s32   #foreign kernel32;
 WaitForSingleObject       :: (handle: *void, milliseconds: u32)                                                                 -> u32   #foreign kernel32;
 
-one_time_init :: (synch_value: *s32, to_insert: Code) #expand 
+write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
 {
-    // A routine to run the code in 'to_insert' only once, even if
-    // there are multiple threads. synch_value.* should be 0 at startup.
-
-    // The values of synch_value.*:
-    // 0 = uninitialized, 1 = in progress init, 2 = initialized.
-
-    // Courtesy of Jeff Roberts.
-
-    while 1 
-    {
-        // @Warning: Apparently this read may not work on ARM, we need to look into it.
-        // The goal here is just to avoid the overhead of spamming the compare_and_swap.
-        if synch_value.* == 2  break;
-
-        success, old := compare_and_swap(synch_value, 0, 1);
-        if old == 
-        {
-            case 0;
-            {
-                #insert to_insert;
-            
-                if !compare_and_swap(synch_value, 1, 2) debug_break();  // Should not happen!
-            }
-            case 1;
-            {
-                for 1..4 #asm { pause; pause; pause; pause; pause; }
-            }
-            case 2; {}
-        }
-    }
-}
-
-init_synchronization :: () #no_context
-{
-
-#if USE_TICKET_MUTEX
-{
-}
-else
-{
-	InitializeCriticalSection(*CONSOLE_LOCK);
-}
-
-    STD_OUTPUT_HANDLE :: -11;
-    STD_ERROR_HANDLE  :: -12;
-    STANDARD_OUTPUT = GetStdHandle(STD_OUTPUT_HANDLE);
-    STANDARD_ERROR  = GetStdHandle(STD_ERROR_HANDLE);
+	written: u32;
+	handle := ifx to_standard_error then STANDARD_ERROR else STANDARD_OUTPUT;
+	status := WriteFile(handle, s.data, cast(u32) s.count, *written, null);
 }

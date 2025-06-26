@@ -39,6 +39,8 @@ Thread :: AlignToCacheLine(struct
 
 	semaphore: Semaphore;
 	
+	// TODO: Add debug info to known whether the same thread tries to lock
+	// the mutex multiple times
 	available_mutex: Mutex;
 	completed_mutex: Mutex;
 	// TODO: Think if this might be needed (one reason might be, since
@@ -114,7 +116,7 @@ ThreadGroup :: struct
 
 #scope_file
 
-WorkList :: FreeLinkedList(Work, DOUBLE_LINK=true);
+WorkList :: FreeLinkedList(Work);
 
 #scope_export
 
@@ -145,8 +147,8 @@ init_thread :: inline (index: s64, arena: *ArenaAllocator)
 	start(*thread.available_mutex);
 	start(*thread.completed_mutex);
 	thread.allocator = .{allocator_proc, arena};
-	thread.available = make_free_list(Work, DOUBLE_LINK=true,, thread.allocator);
-	thread.completed = make_free_list(Work, DOUBLE_LINK=true,, thread.allocator);	
+	thread.available = make_free_list(Work,, thread.allocator);
+	thread.completed = make_free_list(Work,, thread.allocator);	
 }
 
 add_work :: inline (work: Work)
@@ -154,8 +156,8 @@ add_work :: inline (work: Work)
 	assert(THREAD_GROUP.initted);
 	assert(!THREAD_GROUP.shutdown);
 
-	random1 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)THREAD_GROUP.threads.stored);
-	random2 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)THREAD_GROUP.threads.stored);
+	random1 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)(THREAD_GROUP.threads.stored-1));
+	random2 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)(THREAD_GROUP.threads.stored-1));
 	
 	thread1 := *THREAD_GROUP.threads[random1];
 	thread2 := *THREAD_GROUP.threads[random2];
@@ -212,10 +214,9 @@ run_thread :: (index: s64)
 		if THREAD_GROUP.shutdown { break; }
 		
 		work: Work = ---;
-		link: *WorkList.Link;
 PUSH_LOCK(*thread.available_mutex, #code
 {
-		link = get_tail(*thread.available);
+		link := get_tail(*thread.available);
 		assert(link != null);
 
 		work = link.value;
@@ -227,7 +228,7 @@ PUSH_LOCK(*thread.available_mutex, #code
 
 PUSH_LOCK(*thread.completed_mutex, #code
 {
-		insert(*thread.completed, link);
+		insert(*thread.completed, work);
 });
 		
 		FREE(.Temp);
@@ -240,39 +241,46 @@ get_completed_work :: () -> LinkedList(Block(Work))
 
 	PUSH_ALLOCATOR_PARAMS(allocation(.Temp));
 
-	result := make_list(Block(Work), DOUBLE_LINK=false);
+	result := make_list(Block(Work));
 	for *thread: THREAD_GROUP.threads
 	{
+		block := insert(*result, .{});
+
 		count: s64;
-		head: *WorkList.Link;
+		tail, head: *WorkList.Link;
+		
 PUSH_LOCK(*thread.completed_mutex, #code
 {
 		count = get_count(*thread.completed);
-		head  = get_head (*thread.completed);
-});
-		
-		block := insert(*result, .{});
-		if count
+		if count <= 0
 		{
-			reserve(*block.value, count);
-			
-			tail := head;
-			sentinel := get_sentinel(*thread.completed);
-			for 0..count-1
-			{
-				assert(tail != sentinel);
-				block.value[it] = tail.value;
-				
-				tail = tail.next;
-			}
-			
-PUSH_LOCK(*thread.completed_mutex, #code
-{
-			delete(*thread.completed, head, tail, count);
-});
+			continue;
 		}
 		
-		// write_message("Thread(%): completed % works\n", thread.index, count);
+		head = get_head(*thread.completed);
+		tail = get_tail(*thread.completed);
+		unchain(*thread.completed, head, tail, count);
+});
+
+		index := 0; link := head;
+		reserve(*block.value, count);
+		
+		while link != null
+		{
+			block.value[index] = link.value;
+			
+			link = link.next;
+			index += 1;
+		}
+		
+		assert(index == count);
+		
+PUSH_LOCK(*thread.completed_mutex, #code
+{
+		enchain(*thread.completed, head, tail, count);
+});
+		
+		write_message("Thread(%): completed % works\n", thread.index, count);
 	}
 	
 	return result;

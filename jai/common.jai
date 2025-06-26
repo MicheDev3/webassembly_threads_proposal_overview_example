@@ -48,11 +48,12 @@ init_geometry :: (geometry: *Geometry, count: s64)
 {
 	reserve(*geometry.positions, count);
 	reserve(*geometry.normals,   count);
-	// TODO: Properly init the geometry
-	for *geometry.normals
-	{
-		it.* = .{1, 1, 1};
-	}
+}
+
+reset_geometry :: (geometry: *Geometry)
+{
+	for *geometry.positions { it.* = .{0, 0, 0}; }
+	for *geometry.normals   { it.* = .{1, 1, 1}; }
 }
 
 thread_proc :: (data: *void)

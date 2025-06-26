@@ -29,6 +29,9 @@ MEM_COMMIT           :: 0x00001000;
 MEM_RESERVE          :: 0x00002000;
 MEM_RELEASE          :: 0x00008000;
 
+POINTS_COUNT      :: 1_000_004;
+POINTS_PER_THREAD :: 5;
+
 /////////////////////////////
 
 
@@ -37,6 +40,8 @@ MEM_RELEASE          :: 0x00008000;
 /////////////////////////////
 
 MAIN_ARENA_ALLOCATOR: ArenaAllocator;
+
+GEOMETRY: Geometry;
 
 /////////////////////////////
 
@@ -157,6 +162,69 @@ win64_thread_proc :: (params: *void) -> u32 #c_call
 	return 0;
 }
 
+compute_work :: ()
+{
+	reset_geometry(*GEOMETRY);
+	iterations := (POINTS_COUNT / POINTS_PER_THREAD);
+	
+	amount := 1.0;
+	work_count: s64;
+	while work_count < iterations
+	{
+		work: Work;
+		work.type = .Geometry;
+		work.geometry.positions = .{POINTS_PER_THREAD, GEOMETRY.positions.entries + work_count*POINTS_PER_THREAD};
+		work.geometry.normals   = .{POINTS_PER_THREAD, GEOMETRY.normals\ .entries + work_count*POINTS_PER_THREAD};
+		work.geometry.amount = amount;
+		
+		add_work(work);
+
+		amount += 1.0;
+		
+		work_count += 1;
+	}
+	
+	// NOTE: working out the rest
+	if work_count*POINTS_PER_THREAD < POINTS_COUNT
+	{
+		offset := work_count*POINTS_PER_THREAD;
+
+		work: Work;
+		work.type = .Geometry;
+		work.geometry.positions = .{POINTS_COUNT - offset, GEOMETRY.positions.entries + offset};
+		work.geometry.normals   = .{POINTS_COUNT - offset, GEOMETRY.normals\ .entries + offset};
+		work.geometry.amount = amount;
+		
+		add_work(work);
+		
+		iterations += 1;
+	}
+	
+	work_count = 0;
+	while work_count < iterations
+	{
+		for *work_per_thread: get_completed_work()
+		{
+			work_count += work_per_thread.count;			
+		}
+		
+		FREE(.Temp);
+	}
+		
+	amount = 0.0;
+	for GEOMETRY.positions
+	{
+		if it_index % POINTS_PER_THREAD == 0
+		{
+			amount += 1;
+		}
+		
+		normal   := GEOMETRY.normals[it_index];
+		position := normal*amount;
+		assert(it == position);
+	}
+}
+
 /////////////////////////////
 
 
@@ -167,6 +235,8 @@ win64_thread_proc :: (params: *void) -> u32 #c_call
 #program_export "main"
 __system_entry_point :: (argc: s32, argv: **u8) -> s32 #c_call
 {
+	init_synchronization();
+
 	__command_line_arguments.count = argc;
 	__command_line_arguments.data  = argv;
 	
@@ -195,7 +265,7 @@ main :: () -> s32
 	thread_count -= 1;
 	
 	seed := current_time_monotonic();
-	init_thread_group(enable_logging=true, seed.low);
+	init_thread_group(enable_logging=true, cast(u64)seed.high);
 
 	// NOTE: :OS_DEPENDENT
 	//{
@@ -212,78 +282,20 @@ main :: () -> s32
 		CloseHandle(handle);
 	}
 	//}
+	
+	init_geometry(*GEOMETRY, POINTS_COUNT);
 
-	count := 1_000_004;
-	points_per_thread := 5;
-	
-	geometry: Geometry;
-	init_geometry(*geometry, count);
-	
-	iterations := (count / points_per_thread);
-	
-	amount := 1.0;
-	work_count: s64;
-	while work_count < iterations
+	for 0..999
 	{
-		work: Work;
-		work.type = .Geometry;
-		work.geometry.positions = .{points_per_thread, geometry.positions.entries + work_count*points_per_thread};
-		work.geometry.normals   = .{points_per_thread, geometry.normals\ .entries + work_count*points_per_thread};
-		work.geometry.amount = amount;
-		
-		add_work(work);
+		compute_work();
 
-		amount += 1.0;
-		
-		work_count += 1;
-	}
-	
-	// NOTE: working out the rest
-	if work_count*points_per_thread < count
-	{
-		offset := work_count*points_per_thread;
+		print("Index(%): Work completed\n", it,, allocation=allocation(.Temp));
 
-		work: Work;
-		work.type = .Geometry;
-		work.geometry.positions = .{count - offset, geometry.positions.entries + offset};
-		work.geometry.normals   = .{count - offset, geometry.normals\ .entries + offset};
-		work.geometry.amount = amount;
-		
-		add_work(work);
-		
-		iterations += 1;
-	}
-	
-	work_count = 0;
-	while work_count < iterations
-	{
-		for *work_per_thread: get_completed_work()
-		{
-			count := work_per_thread.count;
-			
-			work_count += work_per_thread.count;			
-		}
-		
 		FREE(.Temp);
 	}
-	
-	shutdown();
-	
-	amount = 0.0;
-	for geometry.positions
-	{
-		if it_index % points_per_thread == 0
-		{
-			amount += 1;
-		}
-		
-		normal   := geometry.normals[it_index];
-		position := normal*amount;
-		assert(it == position);
-	}
 
-	print("Work completed\n",, allocation=allocation(.Temp));
-	
+	shutdown();
+
 	return 0;
 }
 
