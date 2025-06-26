@@ -171,11 +171,13 @@ add_work :: inline (work: Work)
 PUSH_LOCK(*thread.available_mutex, #code
 {
 	insert(*thread.available, work, ,, thread.allocator);
+	// TODO: Why, in wasm, does this need to be inside the lock in wasm?
+	// Is some code rearranging happening somehow even in debug?
+	wake(*thread.semaphore);
 });
 
 	write_message("ThreadGroup: '%' added to Thread(%)\n", work, thread.index);
 
-	wake(*thread.semaphore);
 }
 
 run_thread :: (index: s64)
@@ -216,6 +218,7 @@ run_thread :: (index: s64)
 		work: Work = ---;
 PUSH_LOCK(*thread.available_mutex, #code
 {
+		assert(get_count(*thread.available) > 0);
 		link := get_tail(*thread.available);
 		assert(link != null);
 

@@ -29,6 +29,8 @@ MEM_COMMIT           :: 0x00001000;
 MEM_RESERVE          :: 0x00002000;
 MEM_RELEASE          :: 0x00008000;
 
+LOGGING :: false;
+
 POINTS_COUNT      :: 1_000_004;
 POINTS_PER_THREAD :: 5;
 
@@ -317,7 +319,7 @@ main :: () -> s32
 	Work             =Work,
 	MAX_THREAD_COUNT =MAX_THREAD_COUNT,
 	CACHE_LINE_SIZE  =CACHE_LINE_SIZE,
-	LOGGING          =false,
+	LOGGING          =LOGGING,
 	ThreadProc       =thread_proc
 );
 
