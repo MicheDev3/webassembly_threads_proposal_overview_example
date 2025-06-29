@@ -6,40 +6,53 @@
 Block :: struct ($T: Type)
 {
 	count: s64;
-	entries: *T;
+	data:  *T;
 }
 
-Array :: struct ($T: Type, $S: int = 0)
+Array :: struct ($T: Type, $S: int)
 {
 	stored:  s64;
 	entries: [S]T;
 }
 
-ListLink :: struct ($T: Type)
+Buffer :: struct ($T: Type)
 {
-#if type_info(T).type ==
-{
-	case .STRUCT; using value: T;
-	case;               value: T;
-}
-	next: *ListLink(T);
-	prev: *ListLink(T);	
+	stored: s64;
+	entries: Block(T);
 }
 
-LinkedList :: struct ($T: Type)
+AlignStructTo :: struct (S: s64, T: Type)
+#modify 
 {
-	Link :: ListLink(T);
-	
-	count: s64;
-	sentinel: *Link;
-}
+    tis := cast(*Type_Info)T;
+    return tis.type == .STRUCT, "Argument must be a struct.";
+} {
+    #insert -> string 
+    {
+        builder: String_Builder;
+        info := type_info(T);
 
-FreeLinkedList :: struct ($T: Type)
-{
-	Link :: ListLink(T);
+		print_to_builder(*builder, "	Base :: struct\n");
+		print_to_builder(*builder, "	{\n");
+		// TODO: make sure this works for inner union and struct
+        for * info.members 
+        {
+            print_to_builder(*builder, "        %: type_of(T.%);\n", it.name, it.name);  // Use type_of so we don't need to reference the string name of the type.
+        }
+		print_to_builder(*builder, "	}\n");
+        
+		print_to_builder(*builder, #string DONE
+	DESIRED_SIZE :: #run align_forward(size_of(Base), %);
 	
-	used: LinkedList(T);
-	free: LinkedList(T);
+	using base: Base;
+#place base;
+	_: [DESIRED_SIZE] u8 = ---;
+DONE, S
+		);
+		
+		result := builder_to_string(*builder,, temp);
+        return result;
+    }
 }
 
 /////////////////////////////
@@ -53,7 +66,7 @@ operator *[] :: inline (block: *$B/Block, index: s64) -> *block.T
 {
 	assert(index < block.count);
 	
-	result := *(block.entries[index]);
+	result := *(block.data[index]);
 	
 	return result;
 }
@@ -63,6 +76,15 @@ operator *[] :: inline (array: *$A/Array, index: s64) -> *array.T
 	assert(index < array.stored);
 	
 	result := *(array.entries[index]);
+	
+	return result;
+}
+
+operator *[] :: inline (buffer: *$B/Buffer, index: s64) -> *buffer.T
+{
+	assert(index < buffer.stored);
+	
+	result := *(buffer.entries[index]);
 	
 	return result;
 }
@@ -122,66 +144,29 @@ else
 	}
 }
 
-for_expansion :: (list: *$L/LinkedList, body: Code, flags: For_Flags) #expand
+for_expansion :: (buffer: *$B/Buffer, body: Code, flags: For_Flags) #expand
 {
+	
 	POINTER :: cast(bool) (flags & .POINTER);
 	REVERSE :: cast(bool) (flags & .REVERSE);
 	
-	// TODO: Does it really make sense to assert POINTER == true?
-	#assert(POINTER == true);
+	// TODO: For now REVERSE is not supported
+	#assert(REVERSE == false);
 	
-#if REVERSE
+	for slot_index: 0..buffer.stored-1
+	{
+		`it_index := slot_index;
+#if POINTER
 {
-	index := list.count-1;
-	link := list.sentinel.prev;
+		`it := *(buffer.*[slot_index]);
 }
 else
 {
-	index: s64;
-	link := list.sentinel.next;
+		`it := buffer.*[slot_index];
 }
-	
-	while link != list.sentinel
-	{
-		`it_index := index;
-		`it := *link.value;
 		
 		#insert body;
-		
-#if REVERSE
-{
-		index -= 1;
-		link = link.prev;
-}
-else
-{
-		index += 1;
-		link = link.next;
-}
-		
 	}
-}
-
-
-for_expansion :: (list: *$L/FreeLinkedList, body: Code, flags: For_Flags) #expand
-{
-POINTER :: cast(bool) (flags & .POINTER);
-REVERSE :: cast(bool) (flags & .REVERSE);
-
-#if REVERSE
-{
-    for *<`it, `it_index: list.used
-    {
-        #insert body;
-    }
-}
-else
-{
-    for *`it, `it_index: list.used
-    {
-        #insert body;
-    }
-}
 }
 
 ALLOCATE :: (size: s64) -> *void #expand
@@ -213,10 +198,29 @@ PUSH_ALLOCATOR :: (allocator: Allocator) #expand #no_debug
 
 PUSH_LOCK :: (mutex: *Mutex, code: Code) #expand
 {
-	lock        (mutex);
-	defer unlock(mutex);
-	
+	lock  (mutex);
 	#insert code;
+	unlock(mutex);
+}
+
+KIBIBYTES :: (value: s64) -> s64 #expand #no_debug
+{
+	return value*1024;
+}
+
+MEBIBYTES :: (value: s64) -> s64 #expand #no_debug
+{
+	return KIBIBYTES(value)*1024;
+}
+
+GIBIBYTES :: (value: s64) -> s64 #expand #no_debug
+{
+	return MEBIBYTES(value)*1024;
+}
+
+TEBIBYTES :: (value: s64) -> s64 #expand #no_debug
+{
+	return GIBIBYTES(value)*1024;
 }
 
 /////////////////////////////
@@ -233,7 +237,7 @@ PUSH_LOCK :: (mutex: *Mutex, code: Code) #expand
 reserve :: inline (block: *$B/Block, count: s64)
 {
 	block.count = count;
-	block.entries = ALLOCATE(size_of(block.T)*block.count);
+	block.data = ALLOCATE(size_of(block.T)*block.count);
 }
 
 //
@@ -252,237 +256,33 @@ insert :: inline (array: *$A/Array) -> *array.T
 }
 
 //
-// NOTE: LinkedList functions
+// NOTE: Buffer functions
 //
 
-make_list :: inline ($T: Type) -> LinkedList(T)
+reserve :: inline (buffer: *$B/Buffer, count: s64)
 {
-	result: LinkedList(T);
-	result.count = 0;
-	result.sentinel = New(ListLink(T));
-	result.sentinel.next = result.sentinel;
-	result.sentinel.prev = result.sentinel;
+	buffer.stored = 0;
+	reserve(*buffer.entries, count);
+}
+
+insert :: inline (buffer: *$B/Buffer) -> *buffer.T
+{
+	index := buffer.stored;
+	buffer.stored += 1;
 	
+	assert(buffer.stored <= buffer.entries.count);
+	
+	result := *(buffer.*[index]);
 	return result;
 }
 
-enchain :: inline
-(
-	list: *$L/LinkedList,
-	link: *list.Link
-)
+delete :: inline (buffer: *$B/Buffer) -> *buffer.T
 {
-	link.next = list.sentinel.next;
-	link.prev = list.sentinel;
-	
-	link.next.prev = link;
-	link.prev.next = link;
-	
-	list.count += 1;
+	index := buffer.stored - 1;
+	result := *(buffer.*[index]);
 
-	assert(link.next != null);
-	assert(link.prev != null);
-}
-
-enchain :: inline
-(
-	list: *$L/LinkedList,
-	head: *list.Link,
-	tail: *list.Link,
-	count: s64
-)
-{
-	assert(head != list.sentinel);
-	assert(tail != list.sentinel);
-	
-	tail.next = list.sentinel.next;
-	head.prev = list.sentinel;
-	
-	tail.next.prev = tail;
-	head.prev.next = head;
-
-	list.count += count;
-}
-
-unchain :: inline
-(
-	list: *$L/LinkedList,
-	link: *list.Link
-)
-{
-	assert(list.count > 0);
-	assert(link != list.sentinel);
-
-	link.prev.next = link.next;
-	link.next.prev = link.prev;
-	
-	link.next = null;
-	link.prev = null;
-	
-	list.count -= 1;
-}
-
-unchain :: inline
-(
-	list: *$L/LinkedList,
-	head: *list.Link,
-	tail: *list.Link,
-	count: s64
-)
-{
-	assert(list.count > 0);
-	assert(tail != list.sentinel);
-	assert(head != list.sentinel);
-
-	head.prev.next = tail.next;
-	tail.next.prev = head.prev;
-	
-	head.prev = null;
-	tail.next = null;
-	
-	list.count -= count;
-}
-
-insert :: inline
-(
-	list: *$L/LinkedList,
-	value: list.T
-) -> *list.Link
-{
-	result := New(list.Link);
-	result.value = value;
-	
-	enchain(list, result);
-	
-	return result;
-}
-
-get_head :: inline
-(
-	list: *$L/LinkedList
-) -> *list.Link
-{
-	result := list.sentinel.next;
-	if result == list.sentinel
-	{
-		result = null;
-	}
-	
-	return result;
-}
-
-get_tail :: inline
-(
-	list: *$L/LinkedList
-) -> *list.Link
-{
-	result := list.sentinel.prev;
-	if result == list.sentinel
-	{
-		result = null;
-	}
-	
-	return result;
-}
-
-//
-// NOTE: FreeLinkedList functions
-//
-
-make_free_list :: inline ($T: Type) -> FreeLinkedList(T)
-{
-	result: FreeLinkedList(T);
-	result.used = make_list(T);
-	result.free = make_list(T);
-	
-	return result;
-}
-
-enchain :: inline
-(
-	list: *$L/FreeLinkedList,
-	head: *list.Link,
-	tail: *list.Link,
-	count: s64
-)
-{
-	enchain(*list.free, head, tail, count);
-}
-
-unchain :: inline
-(
-	list: *$L/FreeLinkedList,
-	head: *list.Link,
-	tail: *list.Link,
-	count: s64
-)
-{
-	unchain(*list.used, head, tail, count);
-}
-
-insert :: inline
-(
-	list: *$L/FreeLinkedList,
-	value: list.T
-) -> *list.Link
-{
-	result := list.free.sentinel.next;
-	if result == list.free.sentinel
-	{
-		assert(list.free.count == 0);
-		result = insert(*list.used, value);
-	}
-	else
-	{
-		unchain(*list.free, result);
-		enchain(*list.used, result);
-		result.value = value;
-	}
-	
-	return result;
-}
-
-get_head :: inline
-(
-	list: *$L/FreeLinkedList
-) -> *list.Link
-{
-	result := get_head(*list.used);
-	
-	return result;
-}
-
-get_tail :: inline
-(
-	list: *$L/FreeLinkedList
-) -> *list.Link
-{
-	result := get_tail(*list.used);
-	
-	return result;
-}
-
-delete :: inline
-(
-	list: *$L/FreeLinkedList,
-	link: *list.Link
-)
-{
-	unchain(*list.used, link);
-	enchain(*list.free, link);
-}
-
-get_count :: inline (list: *$L/FreeLinkedList) -> s64
-{
-	result := list.used.count;
-	
-	return result;
-}
-
-get_sentinel :: inline (list: *$L/FreeLinkedList) -> *list.Link
-{
-	result := list.used.sentinel;
-	
+	buffer.stored -= 1;
+	assert(buffer.stored >= 0);
 	return result;
 }
 

@@ -15,7 +15,7 @@ WorkType :: enum
 // Structs
 /////////////////////////////
 
-Work :: struct
+WorkAvailable :: struct
 {
 	type: WorkType;
 	
@@ -27,6 +27,11 @@ Work :: struct
 			amount: float;
 		}
 	}
+}
+
+WorkCompleted :: struct
+{
+	geometry_count: s64;
 }
 
 // TODO: Either make sure each work is padded to a cache line (ideal) or
@@ -56,21 +61,35 @@ reset_geometry :: (geometry: *Geometry)
 	for *geometry.normals   { it.* = .{1, 1, 1}; }
 }
 
-thread_proc :: (data: *void)
+process_available_work :: (available: *void)
 {
-	work := cast(*Work) data;
+	a := cast(*WorkAvailable) available;
 	
-	if #complete work.type ==
+	if #complete a.type ==
 	{
 		case .Geometry;
 		{
-			geometry := work.geometry;
+			geometry := a.geometry;
 			
 			for geometry.normals
 			{
 				position := it*geometry.amount;
 				geometry.positions[it_index] += position;
 			}
+		}
+	}
+}
+
+process_completed_work :: (available: *void, completed: *void)
+{
+	a := cast(*WorkAvailable) available;
+	c := cast(*WorkCompleted) completed;
+	
+	if #complete a.type ==
+	{
+		case .Geometry;
+		{
+			c.geometry_count += 1;
 		}
 	}
 }

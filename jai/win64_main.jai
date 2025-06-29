@@ -4,6 +4,7 @@
 /////////////////////////////
 
 kernel32 :: #library,system "kernel32";
+crt      :: #library,system "msvcrt";
 
 /////////////////////////////
 
@@ -29,7 +30,8 @@ MEM_COMMIT           :: 0x00001000;
 MEM_RESERVE          :: 0x00002000;
 MEM_RELEASE          :: 0x00008000;
 
-LOGGING :: false;
+ITERATIONS :: 1000;
+LOGGING    :: false;
 
 POINTS_COUNT      :: 1_000_004;
 POINTS_PER_THREAD :: 5;
@@ -40,8 +42,6 @@ POINTS_PER_THREAD :: 5;
 /////////////////////////////
 // Globals
 /////////////////////////////
-
-MAIN_ARENA_ALLOCATOR: ArenaAllocator;
 
 GEOMETRY: Geometry;
 
@@ -107,9 +107,11 @@ using Creation_Flags :: enum_flags u32
 // Structs
 /////////////////////////////
 
-Win64Thread :: AlignToCacheLine(struct
+Win64Thread :: AlignStructTo(CACHE_LINE_SIZE, 
+struct
 {
-	index:     s64;
+	index:  u32;
+	handle: *void;
 	
 	allocator: ArenaAllocator;
 });
@@ -124,15 +126,20 @@ Win64Thread :: AlignToCacheLine(struct
 GetActiveProcessorCount :: (GroupNumber: u16)                                                     -> u32   #foreign kernel32;
 VirtualAlloc            :: (lpAddress: *void, dwSize: u64, flAllocationType: u32, flProtect: u32) -> *void #foreign kernel32;
 VirtualFree             :: (lpAddress: *void, dwSize: u64, dwFreeType: u32)                       -> BOOL  #foreign kernel32;
-CreateThread            :: (
-	threadAttributes: *void,
-	stackSize: s64,
-	startAddress: *void,
-	parameter: *void,
-	creation_flags: Creation_Flags,
-	threadIdReturn: *s32
-) -> *void #foreign kernel32;
 CloseHandle             :: (handle: *void)                                                        -> s32   #foreign kernel32;
+// NOTE: Jai currently uses the crt lib so we must use crt threading functions
+// https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/beginthread-beginthreadex?view=msvc-170
+//{
+_beginthreadex :: (
+	_Security: *void,
+	_StackSize: u32,
+	_StartAddress: *void,
+	_ArgList: *void,
+	_InitFlag: Creation_Flags,
+	_ThrdAddr: *s32
+) -> *u32 #foreign crt;
+_endthreadex :: (return_code: u32) #foreign crt;
+//}
 
 /////////////////////////////
 
@@ -145,12 +152,11 @@ init_arena :: inline (arena: *ArenaAllocator, total_size: s64, temp_size: s64)
 {
 	assert(total_size > temp_size);
 	
-	block := VirtualAlloc(null, cast(u64)total_size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
-	assert(block != null);
+	memory := VirtualAlloc(null, cast(u64)total_size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 	
 	main_size := total_size - temp_size;
-	arena.main = .{block,             main_size, 0};
-	arena.temp = .{block + main_size, temp_size, 0};
+	arena.main = .{memory,             main_size, 0};
+	arena.temp = .{memory + main_size, temp_size, 0};	
 }
 
 win64_thread_proc :: (params: *void) -> u32 #c_call
@@ -159,8 +165,10 @@ win64_thread_proc :: (params: *void) -> u32 #c_call
 	push_context,defer_pop ctx;
 	
 	thread: *Win64Thread = params;
+	context.thread_index = thread.index;
 	run_thread(thread.index);
 	
+	_endthreadex(0);
 	return 0;
 }
 
@@ -173,10 +181,10 @@ compute_work :: ()
 	work_count: s64;
 	while work_count < iterations
 	{
-		work: Work;
+		work: WorkAvailable;
 		work.type = .Geometry;
-		work.geometry.positions = .{POINTS_PER_THREAD, GEOMETRY.positions.entries + work_count*POINTS_PER_THREAD};
-		work.geometry.normals   = .{POINTS_PER_THREAD, GEOMETRY.normals\ .entries + work_count*POINTS_PER_THREAD};
+		work.geometry.positions = .{POINTS_PER_THREAD, GEOMETRY.positions.data + work_count*POINTS_PER_THREAD};
+		work.geometry.normals   = .{POINTS_PER_THREAD, GEOMETRY.normals\ .data + work_count*POINTS_PER_THREAD};
 		work.geometry.amount = amount;
 		
 		add_work(work);
@@ -191,10 +199,10 @@ compute_work :: ()
 	{
 		offset := work_count*POINTS_PER_THREAD;
 
-		work: Work;
+		work: WorkAvailable;
 		work.type = .Geometry;
-		work.geometry.positions = .{POINTS_COUNT - offset, GEOMETRY.positions.entries + offset};
-		work.geometry.normals   = .{POINTS_COUNT - offset, GEOMETRY.normals\ .entries + offset};
+		work.geometry.positions = .{POINTS_COUNT - offset, GEOMETRY.positions.data + offset};
+		work.geometry.normals   = .{POINTS_COUNT - offset, GEOMETRY.normals\ .data + offset};
 		work.geometry.amount = amount;
 		
 		add_work(work);
@@ -207,12 +215,12 @@ compute_work :: ()
 	{
 		for *work_per_thread: get_completed_work()
 		{
-			work_count += work_per_thread.count;			
+			work_count += work_per_thread.geometry_count;			
 		}
 		
 		FREE(.Temp);
 	}
-		
+	
 	amount = 0.0;
 	for GEOMETRY.positions
 	{
@@ -245,9 +253,6 @@ __system_entry_point :: (argc: s32, argv: **u8) -> s32 #c_call
 	ctx: #Context;
 	push_context,defer_pop ctx;
 	
-	init_arena(*MAIN_ARENA_ALLOCATOR, MAIN_MEMORY_SIZE, TEMP_MEMORY_SIZE);
-	context.allocator.data = *MAIN_ARENA_ALLOCATOR;
-	
 	result := no_inline main();
 	return result;
 }
@@ -262,41 +267,64 @@ main :: () -> s32
 	{
 		thread_count = cast(u32)MAX_THREAD_COUNT;
 	}
-	
+
 	// NOTE: excluding the processor running the main thread
 	thread_count -= 1;
+	
+	// TODO: Retrieve how big is a memory page
+	page_size := KIBIBYTES(4);
+	
+	main_memory_size   := align_forward(MAIN_MEMORY_SIZE  , page_size);
+	temp_memory_size   := align_forward(TEMP_MEMORY_SIZE  , page_size);
+	thread_memory_size := align_forward(THREAD_MEMORY_SIZE, page_size);
+	
+	allocator: ArenaAllocator;
+	init_arena(*allocator, main_memory_size, temp_memory_size);
+	context.allocator.data = *allocator;
 	
 	seed := current_time_monotonic();
 	init_thread_group(enable_logging=true, cast(u64)seed.high);
 
 	// NOTE: :OS_DEPENDENT
 	//{
+	threads: Block(Win64Thread);
+	reserve(*threads, thread_count);
 	for 0..thread_count-1
 	{
-		win64_thread := New(Win64Thread);
-		win64_thread.index = it;
-		init_arena(*win64_thread.allocator, THREAD_MEMORY_SIZE, TEMP_MEMORY_SIZE);
-		init_thread(win64_thread.index, *win64_thread.allocator);
+		thread := New(Win64Thread);
+		thread.index = it;
+		init_arena(*thread.allocator, thread_memory_size, temp_memory_size);
+		init_thread(thread.index, *thread.allocator);
 		
 		ignored: s32;
-		handle := CreateThread(null, 0, cast(*void)win64_thread_proc, win64_thread, 0, *ignored);
+		handle := _beginthreadex(null, 0, cast(*void)win64_thread_proc, thread, 0, *ignored);
 		assert(handle != null);
-		CloseHandle(handle);
+		
+		thread.handle = cast(*void)handle;
+		threads[it] = thread;
 	}
 	//}
 	
 	init_geometry(*GEOMETRY, POINTS_COUNT);
 
-	for 0..999
+	for 0..ITERATIONS-1
 	{
 		compute_work();
 
-		print("Index(%): Work completed\n", it,, allocation=allocation(.Temp));
+		print("Iteration(%): Work completed\n", it,, allocation=allocation(.Temp));
 
 		FREE(.Temp);
 	}
 
 	shutdown();
+	
+	// NOTE: :OS_DEPENDENT
+	//{
+	for threads
+	{
+		CloseHandle(it.handle);
+	}
+	//}
 
 	return 0;
 }
@@ -316,11 +344,15 @@ main :: () -> s32
 #import "Common";
 #import "Allocator";
 #import "Threading"()(
-	Work             =Work,
+	WorkAvailable    =WorkAvailable,
+	WorkCompleted    =WorkCompleted,
 	MAX_THREAD_COUNT =MAX_THREAD_COUNT,
+	THREAD_QUEUE_SIZE=100000,
 	CACHE_LINE_SIZE  =CACHE_LINE_SIZE,
+	INTERNAL         =INTERNAL,
 	LOGGING          =LOGGING,
-	ThreadProc       =thread_proc
+	ProcessAvailableWork=process_available_work,
+	ProcessCompletedWork=process_completed_work
 );
 
 /////////////////////////////

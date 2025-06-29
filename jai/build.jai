@@ -14,6 +14,8 @@
 WASM_MEMORY_STACK_SIZE :: #run MEBIBYTES(01);
 WASM_MEMORY_PAGE_SIZE  :: #run KIBIBYTES(64);
 
+WAT_STACK_POINTER_DECLARATION :: "  (global $__stack_pointer (;0;) (import \"env\" \"__stack_pointer\") (mut i64))";
+
 // This wat file will define the atomics operations for multithreading
 WAT_ATOMIC_FILE_CONTENT :: #string DONE
 (module
@@ -166,7 +168,6 @@ export const GLOBALS = {
 };
 DONE
 
-
 /////////////////////////////
 
 
@@ -232,7 +233,7 @@ Win64Options :: struct
 
 WasmOptions :: struct
 {
-	compiler_path: string;
+	toolchain_path: string;
 	
 	js_\ output_path: string;
 	wat_\output_path: string;
@@ -241,8 +242,6 @@ WasmOptions :: struct
 	main_nr_pages:   s64;
 	temp_nr_pages:   s64;
 	worker_nr_pages: s64;
-	
-	compiler_path   = "wat2wasm";
 	
 	js_\ output_path = "js";
 	wat_\output_path = "wat";
@@ -378,6 +377,8 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 {
 	w := compiler_create_workspace("Wasm");
 	
+	executable_name := "app";
+	
 	build_child_options := get_build_options(w);
 	copy_commonly_propagated_fields(build_parent_options, *build_child_options);
 	
@@ -388,7 +389,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	build_child_options.emit_debug_info                     = .DWARF;
 	build_child_options.backtrace_on_crash                  = .OFF; // Runtime_Support_Crash_Handler doesn’t support WASM (yet?)
 	build_child_options.output_path                         = platfomr_options.wasm_output_path;
-	build_child_options.output_executable_name              = "app";
+	build_child_options.output_executable_name              = executable_name;
 	build_child_options.runtime_support_definitions         = .OMIT;
 	// +bulk-memory: will map "memcpy" to "memory.copy" and "memset" to "memory.fill".
 	// +atomics    : necessary for setting "--shared-memory" linker flag.
@@ -480,7 +481,80 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 				];
 				
 				print("\nSelected % memory pages (64Kib per page)\n", platfomr_options.main_nr_pages);
-				print("WASM compiler: \"%\"\n", platfomr_options.compiler_path);
+				print("WASM toolchain: \"%\"\n", platfomr_options.toolchain_path);
+				print("\n");
+
+				wasm2wat := tprint("%/wasm2wat", platfomr_options.toolchain_path);
+				wat2wasm := tprint("%/wat2wasm", platfomr_options.toolchain_path);
+				wasm := tprint("%../public/%.wasm", #filepath, executable_name);
+				wat  := tprint("%../public/%.wat",  #filepath, executable_name);
+				
+				{
+					args: [..]string;
+					array_add(*args, wasm2wat);
+					array_add(*args, "--enable-threads");
+					array_add(*args, "--enable-memory64");
+					array_add(*args, wasm);
+					array_add(*args, "-o");
+					array_add(*args, wat);
+					result, output_string, error_string, _ := run_command(..args);
+					if result.exit_code != 0
+					{
+						compiler_report(tprint("Failed to convert '%' from wasm to wat error: %", wasm, error_string));
+					}
+				}
+				
+				{
+					old_content := read_entire_file(wat);
+					old_lines := split(old_content, "\n");
+					
+					new_lines: [..]string;
+					add_stack_pointer_declaration := true;
+					for old_lines
+					{
+						if add_stack_pointer_declaration
+						{
+							if contains(it, "(import ") 
+							{
+								array_add(*new_lines, WAT_STACK_POINTER_DECLARATION);
+
+								add_stack_pointer_declaration = false;
+							}
+						}
+						
+						if !contains(it, "(global $__stack_pointer")
+						{
+							array_add(*new_lines, it);
+						}
+					}
+					
+					new_content := join(..new_lines, "\n");
+					if !write_entire_file(wat, new_content)
+					{
+						compiler_report(tprint("Failed to patch '%'", wat));
+					}
+				}
+				
+				{
+					args: [..]string;
+					array_add(*args, wat2wasm);
+					array_add(*args, "--enable-threads");
+					array_add(*args, "--enable-memory64");
+					array_add(*args, wat);
+					array_add(*args, "-o");
+					array_add(*args, wasm);
+					result, output_string, error_string, _ := run_command(..args);
+					if result.exit_code != 0
+					{
+						compiler_report(tprint("Failed to convert '%' from wat to wasm error: %", wat, error_string));
+					}
+				}
+
+				print("Patched binary to support multithreading by running the following steps:\n");
+				print("    - coverting from wasm to wat\n");
+				print("    - patch wat file\n");
+				print("    - coverting from wat to wasm\n");
+				print("\n");
 				
 				for wat_files
 				{
@@ -490,7 +564,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 					}
 					
 					args: [..]string;
-					array_add(*args, platfomr_options.compiler_path);
+					array_add(*args, wat2wasm);
 					array_add(*args, "--enable-threads");
 					array_add(*args, "--enable-memory64");
 					for flag: it.flags { array_add(*args, flag); }
@@ -510,6 +584,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 				{
 					print("     - from '%' to '%'\n", it.src, it.dst);
 				}
+				print("\n");
 				
 				print("Generated js files:\n");
 				for JsSource.[
@@ -528,6 +603,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 						compiler_report(tprint("Failed to generate '%'", it.dst));
 					}
 				}
+				print("\n");
 				
 				break;
 			}
@@ -583,11 +659,11 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 					case "llvm"; { platform_options.backend = .LLVM; }
 				}
 			}
-			case "-wasm-compiler-path";
+			case "-wasm-toolchain-path";
 			{
 				index += 1;
 				
-				w_options.compiler_path = args[index];
+				w_options.toolchain_path = args[index];
 			}
 			case "-wasm-nr-pages";
 			{
@@ -632,6 +708,11 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 				{
 					compiler_report(tprint("Failed to create directory '%'", it));
 				}
+			}
+			
+			if !w_options.toolchain_path
+			{
+				compiler_report("You must specify a toolchain path");
 			}
 			
 			build_wasm(build_parent_options, options, w_options);

@@ -1,15 +1,23 @@
 #module_parameters () (
-	Work: Type = void,
+	WorkAvailable: Type = void,
+	WorkCompleted: Type = void,
 	MAX_THREAD_COUNT  : s64,
+	THREAD_QUEUE_SIZE : s64,
 	CACHE_LINE_SIZE   : s32 = 64,
+	INTERNAL          : bool = false,
 	LOGGING           : bool = false,
-	ThreadProc        := (data: *void)
+	ProcessAvailableWork := (available: *void)
 	{
-		assert(false, "ThreadProc function must be defined!");
+		assert(false, "ProcessAvailableWork function must be defined!");
+	},
+	ProcessCompletedWork := (available: *void, completed: *void)
+	{
+		assert(false, "ProcessCompletedWork function must be defined!");
 	}
 );
 
-#assert Work != void "Work struct must be defined!";
+#assert WorkAvailable != void "WorkAvailable struct must be defined!";
+#assert WorkCompleted != void "WorkCompleted struct must be defined!";
 
 
 /////////////////////////////
@@ -31,7 +39,8 @@ THREAD_GROUP: ThreadGroup;
 
 #scope_file
 
-Thread :: AlignToCacheLine(struct
+Thread :: AlignStructTo(CACHE_LINE_SIZE,
+struct
 {		
 	index: s64;
 	
@@ -48,48 +57,20 @@ Thread :: AlignToCacheLine(struct
 	// instructions order in optimise build) :SHUTDOWN_MUTEX
 	// shutdown_\mutex: Mutex;
 	
-	available: WorkList;
-	completed: WorkList;
+	available: Buffer(WorkAvailable);
+	completed: WorkCompleted;
 	
 	running: bool;
 	
 	// TODO: Have some kind of debug info
+#if INTERNAL
+{
+	completed_count: u64;
+}
+
 });
 
 #scope_export
-
-AlignToCacheLine :: struct (T: Type)
-#modify 
-{
-    tis := cast(*Type_Info)T;
-    return tis.type == .STRUCT, "Argument must be a struct.";
-} {
-    #insert -> string 
-    {
-        builder: String_Builder;
-        info := type_info(T);
-
-		print_to_builder(*builder, "	Base :: struct\n");
-		print_to_builder(*builder, "	{\n");
-        for * info.members 
-        {
-            print_to_builder(*builder, "        %: type_of(T.%);\n", it.name, it.name);  // Use type_of so we don't need to reference the string name of the type.
-        }
-		print_to_builder(*builder, "	}\n");
-        
-		print_to_builder(*builder, #string DONE
-	DESIRED_SIZE :: #run align_forward(size_of(Base), %);
-	
-	using base: Base;
-#place base;
-	_: [DESIRED_SIZE] u8 = ---;
-DONE, CACHE_LINE_SIZE
-		);
-		
-		result := builder_to_string(*builder,, temp);
-        return result;
-    }
-}
 
 ThreadGroup :: struct
 {
@@ -114,12 +95,6 @@ ThreadGroup :: struct
 // Types
 /////////////////////////////
 
-#scope_file
-
-WorkList :: FreeLinkedList(Work);
-
-#scope_export
-
 /////////////////////////////
 
 
@@ -143,41 +118,45 @@ init_thread :: inline (index: s64, arena: *ArenaAllocator)
 
 	thread := insert(*THREAD_GROUP.threads);
 	thread.index = index;
+	thread.allocator = .{allocator_proc, arena};
 	start(*thread.semaphore);
 	start(*thread.available_mutex);
 	start(*thread.completed_mutex);
-	thread.allocator = .{allocator_proc, arena};
-	thread.available = make_free_list(Work,, thread.allocator);
-	thread.completed = make_free_list(Work,, thread.allocator);	
+	reserve(*thread.available, THREAD_QUEUE_SIZE,, thread.allocator);
 }
 
-add_work :: inline (work: Work)
+add_work :: inline (work: WorkAvailable)
 {
 	assert(THREAD_GROUP.initted);
 	assert(!THREAD_GROUP.shutdown);
 
-	random1 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)(THREAD_GROUP.threads.stored-1));
-	random2 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)(THREAD_GROUP.threads.stored-1));
+	random1 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)THREAD_GROUP.threads.stored);
+	random2 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)THREAD_GROUP.threads.stored);
+	
+	// NOTE: random_get_within_range is inclusive for both ends but the max, as far I can tell,
+	// seems has less chance to be choosen (maybe due to floating precision?) so I am using stored
+	// and then clamp randomx here
+	if random1 >= THREAD_GROUP.threads.stored random1 -= 1;
+	if random2 >= THREAD_GROUP.threads.stored random2 -= 1;
 	
 	thread1 := *THREAD_GROUP.threads[random1];
 	thread2 := *THREAD_GROUP.threads[random2];
 
 	thread := (
-		ifx get_count(*thread1.available) > get_count(*thread2.available)
+		ifx thread1.available.stored > thread2.available.stored
 		then thread2 
 		else thread1
 	);
 	
 PUSH_LOCK(*thread.available_mutex, #code
 {
-	insert(*thread.available, work, ,, thread.allocator);
-	// TODO: Why, in wasm, does this need to be inside the lock in wasm?
-	// Is some code rearranging happening somehow even in debug?
+	entry := insert(*thread.available);
+	entry.* = work;
+	
 	wake(*thread.semaphore);
 });
 
 	write_message("ThreadGroup: '%' added to Thread(%)\n", work, thread.index);
-
 }
 
 run_thread :: (index: s64)
@@ -199,8 +178,15 @@ run_thread :: (index: s64)
 		close(*thread.semaphore);
 		close(*thread.available_mutex);
 		close(*thread.completed_mutex);
-
+		
+#if INTERNAL
+{
+		write_message("Thread(%): terminated after completing % works\n", index, thread.completed_count);
+}
+else
+{
 		write_message("Thread(%): terminated\n", index);
+}
 			
 		SHUTDOWN();
 
@@ -215,75 +201,46 @@ run_thread :: (index: s64)
 		wait(*thread.semaphore);
 		if THREAD_GROUP.shutdown { break; }
 		
-		work: Work = ---;
+		work: WorkAvailable = ---;
 PUSH_LOCK(*thread.available_mutex, #code
 {
-		assert(get_count(*thread.available) > 0);
-		link := get_tail(*thread.available);
-		assert(link != null);
-
-		work = link.value;
-		delete(*thread.available, link);
+		entry := delete(*thread.available);
+		work = entry.*;
 });
 
-		inline ThreadProc(*work);
+		inline ProcessAvailableWork(*work);
+
 		write_message("Thread(%): work '%' executed\n", index, work);
 
 PUSH_LOCK(*thread.completed_mutex, #code
 {
-		insert(*thread.completed, work);
+		inline ProcessCompletedWork(*work, *thread.completed);
 });
-		
+
+#if INTERNAL
+{
+		thread.completed_count += 1;
+}		
 		FREE(.Temp);
 	}
 }
 
-get_completed_work :: () -> LinkedList(Block(Work))
+get_completed_work :: () -> Array(WorkCompleted, MAX_THREAD_COUNT-1)
 {
 	assert(THREAD_GROUP.initted);
 
 	PUSH_ALLOCATOR_PARAMS(allocation(.Temp));
 
-	result := make_list(Block(Work));
+	result: Array(WorkCompleted, MAX_THREAD_COUNT-1);
 	for *thread: THREAD_GROUP.threads
 	{
-		block := insert(*result, .{});
+		completed := insert(*result);
 
-		count: s64;
-		tail, head: *WorkList.Link;
-		
 PUSH_LOCK(*thread.completed_mutex, #code
 {
-		count = get_count(*thread.completed);
-		if count <= 0
-		{
-			continue;
-		}
-		
-		head = get_head(*thread.completed);
-		tail = get_tail(*thread.completed);
-		unchain(*thread.completed, head, tail, count);
+		completed.* = thread.completed;
+		thread.completed = .{};
 });
-
-		index := 0; link := head;
-		reserve(*block.value, count);
-		
-		while link != null
-		{
-			block.value[index] = link.value;
-			
-			link = link.next;
-			index += 1;
-		}
-		
-		assert(index == count);
-		
-PUSH_LOCK(*thread.completed_mutex, #code
-{
-		enchain(*thread.completed, head, tail, count);
-});
-		
-		write_message("Thread(%): completed % works\n", thread.index, count);
 	}
 	
 	return result;

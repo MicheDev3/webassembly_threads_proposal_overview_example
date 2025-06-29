@@ -581,6 +581,14 @@ else
 close :: (mutex: *Mutex) #no_context
 {
 
+#if USE_TICKET_MUTEX
+{
+}
+else
+{
+	DeleteCriticalSection(mutex);
+}
+
 }
 
 lock :: inline (mutex: *Mutex) #no_context
@@ -654,17 +662,17 @@ SecurityAttributes :: struct
     bInheritHandle: BOOL;
 }
 
-ListEntry :: struct
-{
-   Flink: *ListEntry;
-   Blink: *ListEntry;
-}
-
 #if USE_TICKET_MUTEX
 {
 }
 else
 {
+
+ListEntry :: struct
+{
+   Flink: *ListEntry;
+   Blink: *ListEntry;
+}
 
 MutexDebug :: struct 
 {
@@ -680,8 +688,9 @@ MutexDebug :: struct
 }
 
 InitializeCriticalSection :: (section: *Mutex)                                                                                           #foreign kernel32;
-EnterCriticalSection      :: (lpCriticalSection: *Mutex)                                                                                 #foreign kernel32;
-LeaveCriticalSection      :: (lpCriticalSection: *Mutex)                                                                                 #foreign kernel32;
+DeleteCriticalSection     :: (section: *Mutex)                                                                                           #foreign kernel32;
+EnterCriticalSection      :: (section: *Mutex)                                                                                           #foreign kernel32;
+LeaveCriticalSection      :: (section: *Mutex)                                                                                           #foreign kernel32;
 
 }
 

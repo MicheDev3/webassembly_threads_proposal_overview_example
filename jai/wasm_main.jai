@@ -161,10 +161,10 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 			work_count: s64;
 			while work_count < DISPATCHED_TASKS_COUNT
 			{
-				work: Work;
+				work: WorkAvailable;
 				work.type = .Geometry;
-				work.geometry.positions = .{POINTS_PER_THREAD, GEOMETRY.positions.entries + work_count*POINTS_PER_THREAD};
-				work.geometry.normals   = .{POINTS_PER_THREAD, GEOMETRY.normals\ .entries + work_count*POINTS_PER_THREAD};
+				work.geometry.positions = .{POINTS_PER_THREAD, GEOMETRY.positions.data + work_count*POINTS_PER_THREAD};
+				work.geometry.normals   = .{POINTS_PER_THREAD, GEOMETRY.normals\ .data + work_count*POINTS_PER_THREAD};
 				work.geometry.amount = amount;
 				
 				add_work(work);
@@ -179,10 +179,10 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 			{
 				offset := work_count*POINTS_PER_THREAD;
 				
-				work: Work;
+				work: WorkAvailable;
 				work.type = .Geometry;
-				work.geometry.positions = .{POINTS_COUNT - offset, GEOMETRY.positions.entries + offset};
-				work.geometry.normals   = .{POINTS_COUNT - offset, GEOMETRY.normals\ .entries + offset};
+				work.geometry.positions = .{POINTS_COUNT - offset, GEOMETRY.positions.data + offset};
+				work.geometry.normals   = .{POINTS_COUNT - offset, GEOMETRY.normals\ .data + offset};
 				work.geometry.amount = amount;
 				
 				add_work(work);
@@ -197,7 +197,7 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 			result = PROCESSING_WORK;
 			for *work_per_thread: get_completed_work()
 			{
-				COMPLETED_TASKS_COUNT += work_per_thread.count;
+				COMPLETED_TASKS_COUNT += work_per_thread.geometry_count;
 			}
 			
 			work_is_done := COMPLETED_TASKS_COUNT >= DISPATCHED_TASKS_COUNT;
@@ -238,11 +238,15 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 #import "Common";
 #import "Allocator";
 #import "Threading"()(
-	Work             =Work,
+	WorkAvailable    =WorkAvailable,
+	WorkCompleted    =WorkCompleted,
 	MAX_THREAD_COUNT =MAX_THREAD_COUNT,
+	THREAD_QUEUE_SIZE=100000,
 	CACHE_LINE_SIZE  =CACHE_LINE_SIZE,
+	INTERNAL         =INTERNAL,
 	LOGGING          =LOGGING,
-	ThreadProc       =thread_proc,
+	ProcessAvailableWork=process_available_work,
+	ProcessCompletedWork=process_completed_work
 );
 
 /////////////////////////////

@@ -8,15 +8,12 @@ Build Parameters:
 	- max-thread-count: maximum number of threads. Default = 32
 	- platform: whether platform to build. Required = (wasm|win64|linux)
 	- backend: whether backend to use. Ignored for wasm. Default = x64
-	- wasm-compiler-path: compiler to generate wasm files from wat. Default = "wat2wasm"
-	- wasm-nr-pages: how many pages the wasm memory will have. Default = 100
+	- wasm-toolchain-path: wasm toolchain. Required
+	- wasm-nr-pages: how many pages the wasm memory will have. Default = 10000
 
-e.g: `jai jai/build.jai - -platform wasm`
+e.g: `jai jai/build.jai - -platform wasm -wasm-toolchain-path "/home/gui/Downloads/wabt-1.0.37-ubuntu-20.04/wabt-1.0.37/bin"  -max-thread-count 16`
 
-more complete: `jai jai/build.jai - -internal -platform wasm -wasm-compiler-path "W:\freelance\polygonjs\wabt\1.0.37\bin\wat2wasm.exe" -wasm-nr-pages 1000 -max-thread-count 32 && jai jai/wat2wasm.jai`
-or for linux: `jai jai/build.jai - -internal -platform wasm -wasm-compiler-path "/home/gui/Downloads/wabt-1.0.37-ubuntu-20.04/wabt-1.0.37/bin/wat2wasm" -wasm-nr-pages 1000 -max-thread-count 16 && jai jai/wat2wasm.jai`
-
-NOTE: Linux is not currently implemented
+NOTE: Linux native implementation is not currently implemented
 
 # Wasm
 
