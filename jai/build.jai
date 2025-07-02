@@ -224,7 +224,7 @@ Win64Options :: struct
 	
 	backend: Backend;
 	
-	main_memory_size   = #run MEBIBYTES(100);
+	main_memory_size   = #run GIBIBYTES(1);
 	temp_memory_size   = #run MEBIBYTES(50);
 	thread_memory_size = #run MEBIBYTES(100);
 	

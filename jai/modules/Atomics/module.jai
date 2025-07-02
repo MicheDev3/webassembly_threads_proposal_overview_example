@@ -1,5 +1,7 @@
 
-#module_parameters () (LLVM := true);
+#module_parameters () (
+	LLVM: bool = true
+);
 
 /////////////////////////////
 // Constants
@@ -45,6 +47,12 @@ atomic_memcpy_i64 :: (dst: *void, src: *void, len: s64, is_volatile: bool) #no_c
 // Structs
 /////////////////////////////
 
+Mutex :: struct
+{
+    ticket:  u64;
+    serving: u64;
+}
+
 /////////////////////////////
 
 
@@ -85,7 +93,7 @@ is_atomic :: (T: Type) -> bool #compile_time
 
 #scope_export
 
-atomic_write :: (lhs: *$T, rhs: T) #no_context
+atomic_write :: inline (lhs: *$T, rhs: T) #no_context
 #modify { return is_atomic(T); }
 {
 	size :: size_of(T);
@@ -97,7 +105,7 @@ atomic_write :: (lhs: *$T, rhs: T) #no_context
 	}
 }
 
-atomic_read :: (value: *$T) -> T #no_context
+atomic_read :: inline (value: *$T) -> T #no_context
 #modify { return is_atomic(T); }
 {
 	result: T;
@@ -112,18 +120,42 @@ atomic_read :: (value: *$T) -> T #no_context
 	return result;
 }
 
-atomic_add :: (lhs: *$T, rhs: T) -> T #no_context
+atomic_add :: inline (lhs: *$T, rhs: T) -> T #no_context
 #modify { return is_atomic(T); }
 {
-	result: T = lhs.*;
+
 #asm
 {
 	lock_xadd?T [lhs], rhs;
 }
 	
+	result: T = rhs;
 	return result;
 }
 
+initialize_critical_section :: inline (mutex: *Mutex) #no_context
+{
+	mutex.* = .{};
+}
+
+delete_critical_section :: inline (mutex: *Mutex) #no_context
+{
+
+}
+
+enter_critical_section :: inline (mutex: *Mutex) #no_context
+{
+	ticket := atomic_add(*mutex.ticket, 1);
+	while ticket != atomic_read(*mutex.serving)
+	{
+		#asm { pause; }
+	}
+}
+
+leave_critical_section :: inline (mutex: *Mutex) #no_context
+{
+	atomic_add(*mutex.serving, 1);
+}
 
 /////////////////////////////
 

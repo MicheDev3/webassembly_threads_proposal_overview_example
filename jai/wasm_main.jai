@@ -167,7 +167,7 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 				work.geometry.normals   = .{POINTS_PER_THREAD, GEOMETRY.normals\ .data + work_count*POINTS_PER_THREAD};
 				work.geometry.amount = amount;
 				
-				add_work(work);
+				add_work(work, sequentially=false);
 				
 				amount += 1.0;
 				
@@ -185,7 +185,7 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 				work.geometry.normals   = .{POINTS_COUNT - offset, GEOMETRY.normals\ .data + offset};
 				work.geometry.amount = amount;
 				
-				add_work(work);
+				add_work(work, sequentially=false);
 				
 				DISPATCHED_TASKS_COUNT += 1;
 			}

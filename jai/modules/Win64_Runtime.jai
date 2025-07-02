@@ -454,8 +454,6 @@ set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
 
 #scope_module
 
-#import "Atomics";
-
 Default_Allocator :: #import "Default_Allocator";
 
 runtime_support_default_allocator_proc :: Default_Allocator.allocator_proc;
@@ -492,17 +490,11 @@ __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, file
 
 // TODO: There is a issue with the TicketMutex system when we push a lot of works like 
 // in the thousands or greater.
-USE_TICKET_MUTEX :: false;
+USE_TICKET_MUTEX :: true;
 
 #if USE_TICKET_MUTEX
 {
-
-Mutex :: struct
-{
-    ticket:  u64;
-    serving: u64;
-}
-
+	#import "Atomics";
 }
 else
 {
@@ -570,6 +562,7 @@ start :: (mutex: *Mutex) #no_context
 
 #if USE_TICKET_MUTEX
 {
+	initialize_critical_section(mutex);
 }
 else
 {
@@ -583,6 +576,7 @@ close :: (mutex: *Mutex) #no_context
 
 #if USE_TICKET_MUTEX
 {
+	delete_critical_section(mutex);
 }
 else
 {
@@ -596,11 +590,7 @@ lock :: inline (mutex: *Mutex) #no_context
 
 #if USE_TICKET_MUTEX
 {
-	ticket := atomic_add(*mutex.ticket, 1);
-	while ticket != atomic_read(*mutex.serving)
-	{
-		#asm { pause; }
-	}
+	enter_critical_section(mutex);
 }
 else
 {
@@ -614,7 +604,7 @@ unlock :: inline (mutex: *Mutex) #no_context
 
 #if USE_TICKET_MUTEX
 {
-	atomic_add(*mutex.serving, 1);
+	leave_critical_section(mutex);
 }
 else
 {

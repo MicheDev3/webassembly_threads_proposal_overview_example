@@ -13,7 +13,8 @@
 	ProcessCompletedWork := (available: *void, completed: *void)
 	{
 		assert(false, "ProcessCompletedWork function must be defined!");
-	}
+	},
+	GetCurrentTimestamp := () -> u64 { return 0; }
 );
 
 #assert WorkAvailable != void "WorkAvailable struct must be defined!";
@@ -66,6 +67,10 @@ struct
 #if INTERNAL
 {
 	completed_count: u64;
+	
+	min: u64;
+	avg: u64;
+	max: u64;	
 }
 
 });
@@ -77,6 +82,8 @@ ThreadGroup :: struct
 	threads: Array(Thread, MAX_THREAD_COUNT-1);
 	
 	entropy: Random_State;
+	
+	cursor: s64;
 
 	shutdown: bool;
 	initted:  bool;
@@ -123,13 +130,32 @@ init_thread :: inline (index: s64, arena: *ArenaAllocator)
 	start(*thread.available_mutex);
 	start(*thread.completed_mutex);
 	reserve(*thread.available, THREAD_QUEUE_SIZE,, thread.allocator);
+	
+#if INTERNAL
+{
+	thread.min = 0xffff_ffff_ffff_ffff;
 }
 
-add_work :: inline (work: WorkAvailable)
+}
+
+add_work :: inline (work: WorkAvailable, $sequentially: bool)
 {
 	assert(THREAD_GROUP.initted);
 	assert(!THREAD_GROUP.shutdown);
 
+#if sequentially
+{
+	thread := *THREAD_GROUP.threads[THREAD_GROUP.cursor];
+	THREAD_GROUP.cursor += 1;
+	
+	if THREAD_GROUP.cursor == THREAD_GROUP.threads.stored
+	{
+		THREAD_GROUP.cursor = 0;
+	}
+}
+else
+{
+	// NOTE: based on "The Power of Two Random Choices": https://people.cs.umass.edu/~ramesh/Site/PUBLICATIONS_files/MRS01.pdf
 	random1 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)THREAD_GROUP.threads.stored);
 	random2 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)THREAD_GROUP.threads.stored);
 	
@@ -141,22 +167,24 @@ add_work :: inline (work: WorkAvailable)
 	
 	thread1 := *THREAD_GROUP.threads[random1];
 	thread2 := *THREAD_GROUP.threads[random2];
-
+	
 	thread := (
 		ifx thread1.available.stored > thread2.available.stored
-		then thread2 
+		then thread2
 		else thread1
 	);
+}
 	
 PUSH_LOCK(*thread.available_mutex, #code
 {
 	entry := insert(*thread.available);
 	entry.* = work;
 	
-	wake(*thread.semaphore);
 });
 
 	write_message("ThreadGroup: '%' added to Thread(%)\n", work, thread.index);
+	
+	wake(*thread.semaphore);
 }
 
 run_thread :: (index: s64)
@@ -208,7 +236,21 @@ PUSH_LOCK(*thread.available_mutex, #code
 		work = entry.*;
 });
 
+#if INTERNAL
+{
+		start := inline GetCurrentTimestamp();
+}
 		inline ProcessAvailableWork(*work);
+
+#if INTERNAL
+{
+		end := inline GetCurrentTimestamp();
+		elapsed := end - start;
+		
+		if elapsed < thread.min thread.min = elapsed;
+		if elapsed > thread.max thread.max = elapsed;
+		thread.avg += elapsed;
+}
 
 		write_message("Thread(%): work '%' executed\n", index, work);
 
@@ -228,8 +270,6 @@ PUSH_LOCK(*thread.completed_mutex, #code
 get_completed_work :: () -> Array(WorkCompleted, MAX_THREAD_COUNT-1)
 {
 	assert(THREAD_GROUP.initted);
-
-	PUSH_ALLOCATOR_PARAMS(allocation(.Temp));
 
 	result: Array(WorkCompleted, MAX_THREAD_COUNT-1);
 	for *thread: THREAD_GROUP.threads
@@ -311,6 +351,27 @@ write_message :: inline (#discard format: string, #discard args: ..Any)
 toggle_logging :: inline ()
 {
 
+}
+
+}
+
+print_thread_group_stats :: ()
+{
+
+#if INTERNAL
+{
+	for *thread: THREAD_GROUP.threads
+	{
+		print("Thread(%) completed % works\n", thread.index, thread.completed_count);
+		print("    - min = %\n", thread.min);
+		print("    - avg = %\n", thread.avg / thread.completed_count);
+		print("    - max = %\n", thread.max);
+		
+		thread.completed_count = 0;
+		thread.min = 0;
+		thread.avg = 0;
+		thread.max = 0;
+	}
 }
 
 }
