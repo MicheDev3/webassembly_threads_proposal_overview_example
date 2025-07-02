@@ -55,6 +55,15 @@ DONE, S
     }
 }
 
+Statistics :: struct
+{
+	min:   u64;
+	avg:   u64;
+	max:   u64;
+	
+	count: u64;
+}
+
 /////////////////////////////
 
 
@@ -284,6 +293,28 @@ delete :: inline (buffer: *$B/Buffer) -> *buffer.T
 	buffer.stored -= 1;
 	assert(buffer.stored >= 0);
 	return result;
+}
+
+//
+// NOTE: Statistics functions
+//
+
+reset_stats :: inline (stats: *Statistics)
+{
+	stats.min = 0xffff_ffff_ffff_ffff;
+	stats.avg = 0;
+	stats.max = 0;
+	
+	stats.count = 0;
+}
+
+compute_stats :: inline (stats: *Statistics, elapsed: u64)
+{
+	if elapsed < stats.min stats.min = elapsed;
+	if elapsed > stats.max stats.max = elapsed;
+	stats.avg += elapsed;
+
+	stats.count += 1;
 }
 
 /////////////////////////////

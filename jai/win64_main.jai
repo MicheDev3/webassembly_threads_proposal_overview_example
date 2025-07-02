@@ -48,9 +48,7 @@ GEOMETRY: Geometry;
 
 SUMMATIONS: Block(Summation);
 
-PUSH_GEOMETRY_WORK_STATS:  Statistics;
 WAIT_WORK_COMPLETED_STATS: Statistics;
-COMPUTE_WORK_STATS:        Statistics;
 
 /////////////////////////////
 
@@ -181,8 +179,6 @@ win64_thread_proc :: (params: *void) -> u32 #c_call
 
 compute_work :: (thread_count: s64)
 {
-	start := rdtsc();
-
 	seed := current_time_monotonic();
 	// TODO: Check this is correct
 	random_seed(cast,force(Some_Big_Time_Value)seed);
@@ -194,7 +190,7 @@ compute_work :: (thread_count: s64)
 	// summation_iterations := SUMMATIONS_COUNT;
 	
 	current, target: WorkCompleted;
-	push_geometry_work(*target, thread_count, POINTS_COUNT, *PUSH_GEOMETRY_WORK_STATS);
+	push_geometry_work(*target, thread_count, POINTS_COUNT);
 	
 	// summation_work_count: s64;
 	// while summation_work_count < summation_iterations
@@ -209,8 +205,8 @@ compute_work :: (thread_count: s64)
 		
 	// 	summation_work_count += 1;
 	// }
-	
-	start_wait := rdtsc();
+		
+	start := rdtsc();
 	while true
 	{
 		for *completed_per_thread: get_completed_work()
@@ -221,11 +217,7 @@ compute_work :: (thread_count: s64)
 		if current >= target
 		{
 			assert(current == target);
-		
-			elapsed := rdtsc() - start_wait;
-			if elapsed < WAIT_WORK_COMPLETED_STATS.min WAIT_WORK_COMPLETED_STATS.min = elapsed;
-			if elapsed > WAIT_WORK_COMPLETED_STATS.max WAIT_WORK_COMPLETED_STATS.max = elapsed;
-			WAIT_WORK_COMPLETED_STATS.avg += elapsed;	
+			compute_stats(*WAIT_WORK_COMPLETED_STATS, rdtsc() - start);
 
 			break;
 		}
@@ -312,39 +304,24 @@ main :: () -> s32
 	
 	init_geometry(*GEOMETRY, POINTS_COUNT);
 	init_summations(*SUMMATIONS, SUMMATIONS_COUNT);
+	reset_stats(*WAIT_WORK_COMPLETED_STATS);
 
 	start := rdtsc();
 	for 1..ITERATIONS
 	{
-		start := rdtsc();
 		compute_work(thread_count);
-		elapsed := rdtsc() - start;
-		if elapsed < COMPUTE_WORK_STATS.min COMPUTE_WORK_STATS.min = elapsed;
-		if elapsed > COMPUTE_WORK_STATS.max COMPUTE_WORK_STATS.max = elapsed;
-		COMPUTE_WORK_STATS.avg += elapsed;
 		
 		FREE(.Temp);
 	}
+	elapsed := rdtsc() - start;
 	
-	WAIT_WORK_COMPLETED_STATS.avg /= cast(u64)ITERATIONS;
-	PUSH_GEOMETRY_WORK_\STATS.avg /= cast(u64)ITERATIONS;
-	COMPUTE_WORK_\      STATS.avg /= cast(u64)ITERATIONS;
-
-	print("\n",, allocation=allocation(.Temp));
 	print_thread_group_stats(,, allocation=allocation(.Temp));
-	
-	print("Process % iterations in % (% threads)\n", ITERATIONS, rdtsc() - start, thread_count,, allocation=allocation(.Temp));
-	print("    - push geometry work   min = %\n", PUSH_GEOMETRY_WORK_\STATS.min,, allocation=allocation(.Temp));
-	print("    - push geometry work   avg = %\n", PUSH_GEOMETRY_WORK_\STATS.avg,, allocation=allocation(.Temp));
-	print("    - push geometry work   max = %\n", PUSH_GEOMETRY_WORK_\STATS.max,, allocation=allocation(.Temp));
-	print("    - wait work completed  min = %\n", WAIT_WORK_COMPLETED_STATS.min,, allocation=allocation(.Temp));
-	print("    - wait work completed  avg = %\n", WAIT_WORK_COMPLETED_STATS.avg,, allocation=allocation(.Temp));
-	print("    - wait work completed  max = %\n", WAIT_WORK_COMPLETED_STATS.max,, allocation=allocation(.Temp));
-	print("    - compute work         min = %\n", COMPUTE_WORK_\      STATS.min,, allocation=allocation(.Temp));
-	print("    - compute work         avg = %\n", COMPUTE_WORK_\      STATS.avg,, allocation=allocation(.Temp));
-	print("    - compute work         max = %\n", COMPUTE_WORK_\      STATS.max,, allocation=allocation(.Temp));
-	COMPUTE_WORK_\      STATS = .{};
-	WAIT_WORK_COMPLETED_STATS = .{};
+	print("\n",, allocation=allocation(.Temp));
+	print("Process % iterations in % (% threads)\n", ITERATIONS, elapsed, thread_count,, allocation=allocation(.Temp));
+	print("    - wait work completed  min = %\n", WAIT_WORK_COMPLETED_STATS.min                                ,, allocation=allocation(.Temp));
+	print("    - wait work completed  avg = %\n", WAIT_WORK_COMPLETED_STATS.avg/WAIT_WORK_COMPLETED_STATS.count,, allocation=allocation(.Temp));
+	print("    - wait work completed  max = %\n", WAIT_WORK_COMPLETED_STATS.max                                ,, allocation=allocation(.Temp));
+	reset_stats(*WAIT_WORK_COMPLETED_STATS);
 	
 	shutdown();
 	

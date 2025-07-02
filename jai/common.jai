@@ -51,15 +51,6 @@ Summation :: struct
 	result: u64;
 }
 
-Statistics :: struct
-{
-	min: u64;
-	avg: u64;
-	max: u64;
-	
-	min = 0xffff_ffff_ffff_ffff;
-}
-
 /////////////////////////////
 
 
@@ -133,7 +124,7 @@ reset_summations :: (summations: *Block(Summation))
 	for *summations { it.* = .{}; }
 }
 
-push_geometry_work :: (completed: *WorkCompleted, thread_count: s64, point_count: s64, stats: *Statistics)
+push_geometry_work :: (completed: *WorkCompleted, thread_count: s64, point_count: s64)
 {
 	iterations := thread_count;
 	points_per_thread := point_count / thread_count;
@@ -142,7 +133,6 @@ push_geometry_work :: (completed: *WorkCompleted, thread_count: s64, point_count
 	
 	while work_count < iterations
 	{
-		start := rdtsc();
 		work: WorkAvailable;
 		work.type = .Geometry;
 		work.geometry.positions = .{points_per_thread, GEOMETRY.positions.data + work_count*points_per_thread};
@@ -151,17 +141,10 @@ push_geometry_work :: (completed: *WorkCompleted, thread_count: s64, point_count
 		
 		add_work(work, sequentially=true);
 		
-		elapsed := rdtsc() - start;
-		if elapsed < stats.min stats.min = elapsed;
-		if elapsed > stats.max stats.max = elapsed;
-		stats.avg += elapsed;
-		
 		amount += 1.0;
 		
 		work_count += 1;
 	}
-	
-	stats.avg /= cast(u64)iterations;
 	
 	// NOTE: working out the rest
 	if work_count*points_per_thread < POINTS_COUNT

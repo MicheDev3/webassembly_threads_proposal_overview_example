@@ -66,11 +66,7 @@ struct
 	// TODO: Have some kind of debug info
 #if INTERNAL
 {
-	completed_count: u64;
-	
-	min: u64;
-	avg: u64;
-	max: u64;	
+	stats: Statistics;
 }
 
 });
@@ -133,7 +129,7 @@ init_thread :: inline (index: s64, arena: *ArenaAllocator)
 	
 #if INTERNAL
 {
-	thread.min = 0xffff_ffff_ffff_ffff;
+	reset_stats(*thread.stats);
 }
 
 }
@@ -209,7 +205,7 @@ run_thread :: (index: s64)
 		
 #if INTERNAL
 {
-		write_message("Thread(%): terminated after completing % works\n", index, thread.completed_count);
+		write_message("Thread(%): terminated after completing % works\n", index, thread.stats.count);
 }
 else
 {
@@ -245,11 +241,7 @@ PUSH_LOCK(*thread.available_mutex, #code
 #if INTERNAL
 {
 		end := inline GetCurrentTimestamp();
-		elapsed := end - start;
-		
-		if elapsed < thread.min thread.min = elapsed;
-		if elapsed > thread.max thread.max = elapsed;
-		thread.avg += elapsed;
+		compute_stats(*thread.stats, end - start);
 }
 
 		write_message("Thread(%): work '%' executed\n", index, work);
@@ -259,10 +251,6 @@ PUSH_LOCK(*thread.completed_mutex, #code
 		inline ProcessCompletedWork(*work, *thread.completed);
 });
 
-#if INTERNAL
-{
-		thread.completed_count += 1;
-}		
 		FREE(.Temp);
 	}
 }
@@ -362,15 +350,13 @@ print_thread_group_stats :: ()
 {
 	for *thread: THREAD_GROUP.threads
 	{
-		print("Thread(%) completed % works\n", thread.index, thread.completed_count);
-		print("    - min = %\n", thread.min);
-		print("    - avg = %\n", thread.avg / thread.completed_count);
-		print("    - max = %\n", thread.max);
+		stats := *thread.stats;
+		print("Thread(%) completed % works\n", thread.index, stats.count);
+		print("    - min = %\n", stats.min);
+		print("    - avg = %\n", stats.avg / stats.count);
+		print("    - max = %\n", stats.max);
 		
-		thread.completed_count = 0;
-		thread.min = 0;
-		thread.avg = 0;
-		thread.max = 0;
+		reset_stats(stats);
 	}
 }
 
