@@ -24,7 +24,7 @@ WorkAvailable :: struct
 	{
 		geometry: struct
 		{
-			using _: Geometry;
+			using chunk: *Geometry;
 			amount: float;
 		}
 		summation: *Summation;
@@ -102,10 +102,15 @@ operator += :: inline (lhs: *$T/WorkCompleted, rhs: T)
 // Functions
 /////////////////////////////
 
-init_geometry :: (geometry: *Geometry, count: s64)
+init_geometry :: (geometries: *Block(Geometry), chunks: s64, points: s64, rest: s64, alignment: s64)
 {
-	reserve(*geometry.positions, count);
-	reserve(*geometry.normals,   count);
+	reserve(geometries, chunks);
+	for *geometries
+	{
+		count := ifx rest != 0 && it_index == geometries.count - 1 then points + rest else points;
+		reserve(*it.positions, count,, allocation=allocation(.Main, alignment));
+		reserve(*it.normals,   count,, allocation=allocation(.Main, alignment));
+	}
 }
 
 init_summations :: (summations: *Block(Summation), count: s64)
@@ -124,19 +129,14 @@ reset_summations :: (summations: *Block(Summation))
 	for *summations { it.* = .{}; }
 }
 
-push_geometry_work :: (completed: *WorkCompleted, thread_count: s64, point_count: s64)
+push_geometry_work :: (geometries: Block(Geometry), completed: *WorkCompleted, secondary_thread_count: s64)
 {
-	iterations := thread_count;
-	points_per_thread := point_count / thread_count;
-
 	amount := 1.0; work_count: s64;
-	
-	while work_count < iterations
+	while work_count < secondary_thread_count
 	{
 		work: WorkAvailable;
 		work.type = .Geometry;
-		work.geometry.positions = .{points_per_thread, GEOMETRY.positions.data + work_count*points_per_thread};
-		work.geometry.normals   = .{points_per_thread, GEOMETRY.normals\ .data + work_count*points_per_thread};
+		work.geometry.chunk = *geometries[work_count];
 		work.geometry.amount = amount;
 		
 		add_work(work, sequentially=true);
@@ -146,37 +146,31 @@ push_geometry_work :: (completed: *WorkCompleted, thread_count: s64, point_count
 		work_count += 1;
 	}
 	
-	// NOTE: working out the rest
-	if work_count*points_per_thread < POINTS_COUNT
+	if geometries.count > secondary_thread_count
 	{
-		offset := work_count*points_per_thread;
-		
 		work: WorkAvailable;
 		work.type = .Geometry;
-		work.geometry.positions = .{POINTS_COUNT - offset, GEOMETRY.positions.data + offset};
-		work.geometry.normals   = .{POINTS_COUNT - offset, GEOMETRY.normals\ .data + offset};
+		work.geometry.chunk = *geometries[work_count];
 		work.geometry.amount = amount;
 		
 		process_available_work(*work);
 	}
 	
-	completed.geometry_count = iterations;
+	completed.geometry_count = secondary_thread_count;
 }
 
-check_geometry_work :: (geometry: *Geometry, thread_count: s64, point_count: s64)
+check_geometry_work :: (geometries: Block(Geometry))
 {
-	amount := 0.0;
-	points_per_thread := POINTS_COUNT / thread_count;
-	for geometry.positions
+	for geometries
 	{
-		if it_index % points_per_thread == 0
+		normals   := it.normals;
+		positions := it.positions;
+		amount := cast(float)(it_index+1);
+		for positions
 		{
-			amount += 1;
+			position := normals[it_index]*amount;
+			assert(it == position);
 		}
-		
-		normal   := geometry.normals[it_index];
-		position := normal*amount;
-		assert(it == position);
 	}
 }
 

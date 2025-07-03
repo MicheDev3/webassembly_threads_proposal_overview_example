@@ -148,8 +148,12 @@ allocator_proc ::
 			assert((alignment & ~(alignment - 1)) == alignment);
 			assert(alignment <= 128);
 			
-			result := arena.base + arena.used;
-			arena.used += align_forward(requested_size, alignment);
+			head_offset := align_forward(arena.used,     alignment);
+			tail_offset := align_forward(requested_size, alignment);
+			 
+			result := arena.base + head_offset;
+			arena.used += tail_offset;
+			
 			assert(arena.used <= arena.size);
 			
 			return result;

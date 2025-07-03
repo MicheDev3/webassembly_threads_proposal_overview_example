@@ -488,8 +488,6 @@ __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, file
 
 #scope_export
 
-// TODO: There is a issue with the TicketMutex system when we push a lot of works like 
-// in the thousands or greater.
 USE_TICKET_MUTEX :: true;
 
 #if USE_TICKET_MUTEX

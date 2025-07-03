@@ -35,7 +35,7 @@ LOGGING    :: false;
 
 SUMMATIONS_COUNT  :: 0;
 // SUMMATIONS_COUNT  :: 10000;
-POINTS_COUNT      :: 10_000_004;
+POINT_COUNT      :: 10_000_004;
 
 /////////////////////////////
 
@@ -44,11 +44,9 @@ POINTS_COUNT      :: 10_000_004;
 // Globals
 /////////////////////////////
 
-GEOMETRY: Geometry;
-
 SUMMATIONS: Block(Summation);
 
-WAIT_WORK_COMPLETED_STATS: Statistics;
+COMPUTE_WORK_STATS: Statistics;
 
 /////////////////////////////
 
@@ -177,21 +175,14 @@ win64_thread_proc :: (params: *void) -> u32 #c_call
 	return 0;
 }
 
-compute_work :: (thread_count: s64)
+compute_work :: (geometries: Block(Geometry), thread_count: s64)
 {
-	seed := current_time_monotonic();
-	// TODO: Check this is correct
-	random_seed(cast,force(Some_Big_Time_Value)seed);
-
+	for *geometries { reset_geometry(it); }
+	
 	// TODO: reimplement SUMMATIONS test
-	reset_geometry(*GEOMETRY);
+	//{
 	// reset_summations(*SUMMATIONS);
-	
 	// summation_iterations := SUMMATIONS_COUNT;
-	
-	current, target: WorkCompleted;
-	push_geometry_work(*target, thread_count, POINTS_COUNT);
-	
 	// summation_work_count: s64;
 	// while summation_work_count < summation_iterations
 	// {
@@ -205,8 +196,13 @@ compute_work :: (thread_count: s64)
 		
 	// 	summation_work_count += 1;
 	// }
+	//}
 		
 	start := rdtsc();
+	
+	current, target: WorkCompleted;
+	push_geometry_work(geometries, *target, thread_count);
+		
 	while true
 	{
 		for *completed_per_thread: get_completed_work()
@@ -217,19 +213,19 @@ compute_work :: (thread_count: s64)
 		if current >= target
 		{
 			assert(current == target);
-			compute_stats(*WAIT_WORK_COMPLETED_STATS, rdtsc() - start);
+			compute_stats(*COMPUTE_WORK_STATS, rdtsc() - start);
 
 			break;
 		}
 	}
 	
-	check_geometry_work(*GEOMETRY, thread_count, POINTS_COUNT);
+	check_geometry_work(geometries);
 	
 	// for SUMMATIONS
 	// {
 	// 	result := (it.count * (it.count + 1)) / 2;
 	// 	assert(it.result == result);
-	// }	
+	// }
 }
 
 /////////////////////////////
@@ -258,15 +254,15 @@ main :: () -> s32
 {
 	// NOTE: :OS_DEPENDENT
 	//{
-	thread_count := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+	all_thread_count := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
 	//}
-	if thread_count > MAX_THREAD_COUNT
+	if all_thread_count > MAX_THREAD_COUNT
 	{
-		thread_count = cast(u32)MAX_THREAD_COUNT;
+		all_thread_count = cast(u32)MAX_THREAD_COUNT;
 	}
 
 	// NOTE: excluding the processor running the main thread
-	thread_count -= 1;
+	secondary_thread_count := all_thread_count - 1;
 	
 	// TODO: Retrieve how big is a memory page
 	page_size := KIBIBYTES(4);
@@ -285,8 +281,8 @@ main :: () -> s32
 	// NOTE: :OS_DEPENDENT
 	//{
 	threads: Block(Win64Thread);
-	reserve(*threads, thread_count);
-	for 0..thread_count-1
+	reserve(*threads, secondary_thread_count);
+	for 0..secondary_thread_count-1
 	{
 		thread := New(Win64Thread);
 		thread.index = it;
@@ -302,26 +298,36 @@ main :: () -> s32
 	}
 	//}
 	
-	init_geometry(*GEOMETRY, POINTS_COUNT);
+	rest: s64;
+	points := POINT_COUNT / all_thread_count;
+	if all_thread_count*points < POINT_COUNT
+	{
+		rest = POINT_COUNT - all_thread_count*points; 
+	}
+	
+	geometries: Block(Geometry);
+	init_geometry(*geometries, all_thread_count, points, rest, CACHE_LINE_SIZE);
+
 	init_summations(*SUMMATIONS, SUMMATIONS_COUNT);
-	reset_stats(*WAIT_WORK_COMPLETED_STATS);
+	reset_stats(*COMPUTE_WORK_STATS);
 
 	start := rdtsc();
 	for 1..ITERATIONS
-	{
-		compute_work(thread_count);
+	{	
+		compute_work(geometries, secondary_thread_count);
 		
 		FREE(.Temp);
 	}
 	elapsed := rdtsc() - start;
 	
+	// TODO: Think more about how to time performance
 	print_thread_group_stats(,, allocation=allocation(.Temp));
 	print("\n",, allocation=allocation(.Temp));
-	print("Process % iterations in % (% threads)\n", ITERATIONS, elapsed, thread_count,, allocation=allocation(.Temp));
-	print("    - wait work completed  min = %\n", WAIT_WORK_COMPLETED_STATS.min                                ,, allocation=allocation(.Temp));
-	print("    - wait work completed  avg = %\n", WAIT_WORK_COMPLETED_STATS.avg/WAIT_WORK_COMPLETED_STATS.count,, allocation=allocation(.Temp));
-	print("    - wait work completed  max = %\n", WAIT_WORK_COMPLETED_STATS.max                                ,, allocation=allocation(.Temp));
-	reset_stats(*WAIT_WORK_COMPLETED_STATS);
+	print("Process % iterations in % (% threads)\n", ITERATIONS, elapsed, all_thread_count ,, allocation=allocation(.Temp));
+	print("    - compute work min = %\n", COMPUTE_WORK_STATS.min                           ,, allocation=allocation(.Temp));
+	print("    - compute work avg = %\n", COMPUTE_WORK_STATS.avg/COMPUTE_WORK_STATS.count  ,, allocation=allocation(.Temp));
+	print("    - compute work max = %\n", COMPUTE_WORK_STATS.max                           ,, allocation=allocation(.Temp));
+	reset_stats(*COMPUTE_WORK_STATS);
 	
 	shutdown();
 	
