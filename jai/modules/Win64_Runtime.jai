@@ -4,13 +4,10 @@
 // version of it.
 //
 
-// NOTE: :OS_DEPENDENT
-
 #module_parameters(DEFINE_SYSTEM_ENTRY_POINT: bool, DEFINE_INITIALIZATION: bool, ENABLE_BACKTRACE_ON_CRASH: bool);
 
 // NOTE: Required to build for unix oses.
 OS_IS_UNIX :: OS == .MACOS || OS == .LINUX || OS == .PS5 || OS == .IOS || OS == .ANDROID;
-
 
 // @Cleanup: __element_duplicate should lose its c_call status, and also be faster...!
 __element_duplicate :: (start: *u8, num_elements: s64, size: s64) #c_call #no_aoc

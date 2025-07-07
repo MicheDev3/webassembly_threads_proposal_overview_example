@@ -126,7 +126,7 @@ runtime_support_assertion_failed :: (loc: Source_Code_Location, message: string)
 runtime_support_default_logger :: (message: string, data: *void, info: Log_Info)
 {
 	if !message then return;
-
+	
 	lock(*CONSOLE_LOCK);
 	defer unlock(*CONSOLE_LOCK);
 	
@@ -436,6 +436,7 @@ set_initial_data :: (ts: *Temporary_Storage, count: s64, data: *u8) #no_context
 	#program_export "main"
 	__system_entry_point :: (argc: s32, argv: **u8) -> s32 #c_call
 	{
+		init_synchronization();
 		__jai_runtime_init(argc, argv);
 		
 		push_context first_thread_context
@@ -484,14 +485,11 @@ __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, file
 
 #scope_export
 
-Mutex :: struct
-{
-	value: s64;
-}
+#import "Atomics";
 
 Semaphore :: struct
 {
-	value: s64;
+	value: *void;
 }
 
 debug_break :: () #no_context
@@ -503,71 +501,97 @@ debug_break :: () #no_context
 	}
 	else
 	{
-		wasm_debug_break();
+		// TODO: Only supporting x64 for simplicity
+		#asm { int3; }
 	}
 }
 
-sleep :: inline (ms: s32) #no_context
+sleep :: inline (ms: s64) #no_context
 {
-	sentinel := 0;
-
-	wasm_sleep(*sentinel, (cast(s64)ms)*1000000);
+	usleep(cast(s32)ms);
 }
 
-start :: (semaphore: *Semaphore, value: s32 = 1) #no_context
+start :: (semaphore: *Semaphore, value: s32 = 0) #no_context
 {
-	semaphore.value = value;
+	sem_init(*semaphore.value, 0, cast(u32) value);
 }
 
 close :: (semaphore: *Semaphore) #no_context
 {
-
+	sem_destroy(*semaphore.value);
+	sem_close  (*semaphore.value);
 }
 
 wake :: inline (semaphore: *Semaphore) #no_context
 {
-	wasm_wake(*semaphore.value);
+	sem_post(*semaphore.value);
 }
 
 wait :: inline (semaphore: *Semaphore) #no_context
 {
-	wasm_wait(*semaphore.value);
+	sem_wait(*semaphore.value);
 }
 
 start :: (mutex: *Mutex) #no_context
 {
-
+	initialize_critical_section(mutex);
 }
 
 close :: (mutex: *Mutex) #no_context
 {
-
+	delete_critical_section(mutex);
 }
 
 lock :: inline (mutex: *Mutex) #no_context
 {
-	wasm_lock(*mutex.value);
+	enter_critical_section(mutex);
 }
 
 unlock :: inline (mutex: *Mutex) #no_context
 {
-	wasm_unlock(*mutex.value);
+	leave_critical_section(mutex);
 }
 
-write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
+init_synchronization :: () #no_context
 {
-	wasm_write_string(s.count, s.data, to_standard_error);
+
 }
 
 #scope_file
 
 CONSOLE_LOCK: Mutex;
-SYNC_INITTED: s32 = 0;
 
-wasm_debug_break  :: ()                                                 #foreign;
-wasm_sleep        :: (address: *s64, ns: s64)                           #foreign;
-wasm_wake         :: (address: *s64)                                    #foreign;
-wasm_wait         :: (address: *s64)                                    #foreign;
-wasm_lock         :: (address: *s64)                                    #foreign;
-wasm_unlock       :: (address: *s64)                                    #foreign;
-wasm_write_string :: (count: s64, data: *void, to_standard_error: bool) #foreign;
+libc     :: #library,system "libc";
+pthreads :: #library,system "libpthread";
+
+Semaphore :: struct
+{
+	value: sem_t;
+}
+
+write  :: (fd: s32, buf: *void, count: u64) -> s64 #foreign libc;
+usleep :: (__useconds: u32)                 -> s32 #foreign libc;
+
+sem_init    :: (__sem: *sem_t, __pshared: s32, __value: u32) -> s32 #foreign libpthread;
+sem_destroy :: (__sem: *sem_t)                               -> s32 #foreign libpthread;
+sem_close   :: (__sem: *sem_t)                               -> s32 #foreign libpthread;
+sem_wait    :: (__sem: *sem_t)                               -> s32 #foreign libpthread;
+sem_post    :: (__sem: *sem_t)                               -> s32 #foreign libpthread;
+
+write_string_unsynchronized :: (s: string, to_standard_error := false) #no_context
+{
+	STDOUT_FILENO : s32 : 1;
+	STDERR_FILENO : s32 : 2;
+	handle := ifx to_standard_error then STDERR_FILENO else STDOUT_FILENO;
+	
+	written: s64;
+	while written != s.count {
+		result := write(handle, s.data + written, cast(u64) (s.count - written));
+		// We should probably be checking errno for failures,
+		// but, on macOS at least, we seem to be getting interrupted
+		// only be EAGAIN.
+		if result < 0 continue;
+		
+		written += result;
+	}
+}

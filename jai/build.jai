@@ -216,7 +216,7 @@ Options :: struct
 	max_thread_count = 32;
 }
 
-Win64Options :: struct
+NativeOptions :: struct
 {
 	main_memory_size:   s64;
 	temp_memory_size:   s64;
@@ -307,7 +307,7 @@ TEBIBYTES :: (value: s64) -> s64 #expand #no_debug
 // Functions
 /////////////////////////////
 
-build_win64 :: (build_parent_options: Build_Options, options: Options, platform_options: Win64Options)
+build_win64 :: (build_parent_options: Build_Options, options: Options, platform_options: NativeOptions)
 {
 	w := compiler_create_workspace("Win64");
 	
@@ -323,7 +323,6 @@ build_win64 :: (build_parent_options: Build_Options, options: Options, platform_
 	
 	llvm: bool;
 	build_child_options.output_executable_name      = "win64";
-	build_child_options.runtime_support_definitions = .OMIT;
 	if platform_options.backend == .X64
 	{
 		build_child_options.backend                 = .X64;
@@ -353,10 +352,7 @@ build_win64 :: (build_parent_options: Build_Options, options: Options, platform_
 	
 	set_build_options(build_child_options, w);
 	
-	// NOTE: :OS_DEPENDENT
-	// {
 	remap_import(w, "*", "Runtime_Support"  , "Win64_Runtime");
-	// }
 	remap_import(w, "*", "Default_Allocator", "Allocator");
 	
 	compiler_begin_intercept(w);
@@ -373,7 +369,69 @@ build_win64 :: (build_parent_options: Build_Options, options: Options, platform_
 	compiler_end_intercept(w);
 }
 
-build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_options: WasmOptions)
+build_linux :: (build_parent_options: Build_Options, options: Options, platform_options: NativeOptions)
+{
+	w := compiler_create_workspace("Linux");
+	
+	build_child_options := get_build_options(w);
+	copy_commonly_propagated_fields(build_parent_options, *build_child_options);
+	
+	import_paths: [..]string;
+	array_add(*import_paths, tprint("%modules", #filepath));
+	for build_child_options.import_path
+	{
+		array_add(*import_paths, it);
+	}
+	
+	llvm: bool;
+	build_child_options.output_executable_name      = "linux";
+	if platform_options.backend == .X64
+	{
+		build_child_options.backend                 = .X64;
+		build_child_options.enable_bytecode_inliner = false;
+		if options.optimise
+		{
+			compiler_report("You cannot run optimisation when using X64 backend");
+		}
+		
+		llvm = false;
+	}
+	else
+	{
+		build_child_options.backend                 = .LLVM;
+		if options.optimise
+		{
+			set_optimization(*build_child_options, .VERY_OPTIMIZED);
+		}
+		else
+		{
+			build_child_options.enable_bytecode_inliner = false;
+		}
+		
+		llvm = true;
+	}
+	build_child_options.import_path = import_paths;
+	
+	set_build_options(build_child_options, w);
+	
+	remap_import(w, "*", "Runtime_Support"  , "Linux_Runtime");
+	remap_import(w, "*", "Default_Allocator", "Allocator");
+	
+	compiler_begin_intercept(w);
+	
+	add_build_file("linux_main.jai", w);
+	add_build_string(tprint("THREAD_MEMORY_SIZE :: %;", platform_options.thread_memory_size), w);
+	add_build_string(tprint("MAIN_MEMORY_SIZE :: %;", platform_options.main_memory_size), w);
+	add_build_string(tprint("TEMP_MEMORY_SIZE :: %;", platform_options.temp_memory_size), w);
+	add_build_string(tprint("CACHE_LINE_SIZE :: %;", options.cache_line_size), w);
+	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
+	add_build_string(tprint("INTERNAL :: %;", options.internal), w);
+	add_build_string(tprint("LLVM :: %;", llvm), w);
+	
+	compiler_end_intercept(w);
+}
+
+build_wasm :: (build_parent_options: Build_Options, options: Options, platform_options: WasmOptions)
 {
 	w := compiler_create_workspace("Wasm");
 	
@@ -388,7 +446,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	build_child_options.cpu_target                          = .CUSTOM;
 	build_child_options.emit_debug_info                     = .DWARF;
 	build_child_options.backtrace_on_crash                  = .OFF; // Runtime_Support_Crash_Handler doesn’t support WASM (yet?)
-	build_child_options.output_path                         = platfomr_options.wasm_output_path;
+	build_child_options.output_path                         = platform_options.wasm_output_path;
 	build_child_options.output_executable_name              = executable_name;
 	build_child_options.runtime_support_definitions         = .OMIT;
 	// +bulk-memory: will map "memcpy" to "memory.copy" and "memset" to "memory.fill".
@@ -408,22 +466,22 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	}
 	build_child_options.import_path = import_paths;
 	
-	total_memory_size := platfomr_options.main_nr_pages*WASM_MEMORY_PAGE_SIZE;
+	total_memory_size := platform_options.main_nr_pages*WASM_MEMORY_PAGE_SIZE;
 	if total_memory_size <= WASM_MEMORY_STACK_SIZE
 	{
 		compiler_report(tprint("'total_memory_size(%)' must be greater than 'WASM_MEMORY_STACK_SIZE(%)'", total_memory_size, WASM_MEMORY_STACK_SIZE));
 	}
 	
 	// TODO: Add an extra padding?
-	if platfomr_options.main_nr_pages <= platfomr_options.worker_nr_pages
+	if platform_options.main_nr_pages <= platform_options.worker_nr_pages
 	{
-		compiler_report(tprint("'nr_pages(%)' must be greater than 'worker_nr_of_pages(%)'", total_memory_size, platfomr_options.worker_nr_pages));
+		compiler_report(tprint("'nr_pages(%)' must be greater than 'worker_nr_of_pages(%)'", total_memory_size, platform_options.worker_nr_pages));
 	}
 	
 	// TODO: Add an extra padding?
-	if platfomr_options.worker_nr_pages <= platfomr_options.temp_nr_pages
+	if platform_options.worker_nr_pages <= platform_options.temp_nr_pages
 	{
-		compiler_report(tprint("'worker_nr_of_pages(%)' must be greater than 'temp_memory_size(%)'", platfomr_options.worker_nr_pages, platfomr_options.temp_nr_pages));
+		compiler_report(tprint("'worker_nr_of_pages(%)' must be greater than 'temp_memory_size(%)'", platform_options.worker_nr_pages, platform_options.temp_nr_pages));
 	}
 	
 /*
@@ -458,8 +516,8 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	compiler_begin_intercept(w);
 	
 	add_build_file("wasm_main.jai", w);
-	add_build_string(tprint("WORKER_NR_OF_PAGES :: %;", platfomr_options.worker_nr_pages), w);
-	add_build_string(tprint("TEMP_NR_OF_PAGES :: %;", platfomr_options.temp_nr_pages), w);
+	add_build_string(tprint("WORKER_NR_OF_PAGES :: %;", platform_options.worker_nr_pages), w);
+	add_build_string(tprint("TEMP_NR_OF_PAGES :: %;", platform_options.temp_nr_pages), w);
 	add_build_string(tprint("CACHE_LINE_SIZE :: %;", options.cache_line_size), w);
 	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
 	add_build_string(tprint("INTERNAL :: %;", options.internal), w);
@@ -473,19 +531,19 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 			{
 				wat_files: []WatToWasmTarget = .[
 					.{
-						tprint("%atomic.wat",  platfomr_options.wat_\output_path),
-						tprint("%atomic.wasm", platfomr_options.wasm_output_path),
-						tprint(WAT_ATOMIC_FILE_CONTENT, platfomr_options.main_nr_pages),
+						tprint("%atomic.wat",  platform_options.wat_\output_path),
+						tprint("%atomic.wasm", platform_options.wasm_output_path),
+						tprint(WAT_ATOMIC_FILE_CONTENT, platform_options.main_nr_pages),
 						string.[],
 					}
 				];
 				
-				print("\nSelected % memory pages (64Kib per page)\n", platfomr_options.main_nr_pages);
-				print("WASM toolchain: \"%\"\n", platfomr_options.toolchain_path);
+				print("\nSelected % memory pages (64Kib per page)\n", platform_options.main_nr_pages);
+				print("WASM toolchain: \"%\"\n", platform_options.toolchain_path);
 				print("\n");
 
-				wasm2wat := tprint("%/wasm2wat", platfomr_options.toolchain_path);
-				wat2wasm := tprint("%/wat2wasm", platfomr_options.toolchain_path);
+				wasm2wat := tprint("%/wasm2wat", platform_options.toolchain_path);
+				wat2wasm := tprint("%/wat2wasm", platform_options.toolchain_path);
 				wasm := tprint("%../public/%.wasm", #filepath, executable_name);
 				wat  := tprint("%../public/%.wat",  #filepath, executable_name);
 				
@@ -589,8 +647,8 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 				print("Generated js files:\n");
 				for JsSource.[
 					.{
-						tprint("%globals.js", platfomr_options.js_\ output_path),
-						tprint(GLOBALS_JS_FILE_CONTENT, platfomr_options.main_nr_pages, WASM_MEMORY_STACK_SIZE, options.max_thread_count)
+						tprint("%globals.js", platform_options.js_\ output_path),
+						tprint(GLOBALS_JS_FILE_CONTENT, platform_options.main_nr_pages, WASM_MEMORY_STACK_SIZE, options.max_thread_count)
 					},
 				]
 				{
@@ -619,7 +677,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 	build_parent_options := get_build_options(w);
 	
 	platform: Platform = .None;
-	options: Options; platform_options: Win64Options; w_options: WasmOptions;
+	options: Options; n_options: NativeOptions; w_options: WasmOptions;
 	
 	index: s64;
 	args := build_parent_options.compile_time_command_line;
@@ -655,8 +713,8 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 				
 				if args[index] ==
 				{
-					case "x64";  { platform_options.backend = .X64;  }
-					case "llvm"; { platform_options.backend = .LLVM; }
+					case "x64";  { n_options.backend = .X64;  }
+					case "llvm"; { n_options.backend = .LLVM; }
 				}
 			}
 			case "-wasm-toolchain-path";
@@ -719,11 +777,11 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platfomr_o
 		}
 		case .Win64;
 		{
-			build_win64(build_parent_options, options, platform_options);
+			build_win64(build_parent_options, options, n_options);
 		}
 		case .Linux;
 		{
-			compiler_report("Linux currently unsupported");
+			build_linux(build_parent_options, options, n_options);
 		}
 	}
 	
