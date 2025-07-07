@@ -489,7 +489,7 @@ __panic_due_to_runtime_call_of_compile_time_procedure :: (line_number: s64, file
 
 Semaphore :: struct
 {
-	value: *void;
+	value: sem_t;
 }
 
 debug_break :: () #no_context
@@ -562,12 +562,14 @@ init_synchronization :: () #no_context
 CONSOLE_LOCK: Mutex;
 
 libc     :: #library,system "libc";
-pthreads :: #library,system "libpthread";
+libpthread :: #library,system "libpthread";
 
-Semaphore :: struct
+sem_t :: union 
 {
-	value: sem_t;
+    size:  [32] u8;
+    align: s64;
 }
+
 
 write  :: (fd: s32, buf: *void, count: u64) -> s64 #foreign libc;
 usleep :: (__useconds: u32)                 -> s32 #foreign libc;

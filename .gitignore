@@ -9,3 +9,5 @@ globals.js
 *.rdi
 *.rdbg
 *.o
+
+jai/linux

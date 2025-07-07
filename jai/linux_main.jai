@@ -4,7 +4,7 @@
 /////////////////////////////
 
 libc     :: #library,system "libc";
-pthreads :: #library,system "libpthread";
+libpthread :: #library,system "libpthread";
 
 /////////////////////////////
 
@@ -26,6 +26,7 @@ PROT_READ    :: 0x1;
 PROT_WRITE   :: 0x2;
 
 MAP_SHARED   :: 0x01;
+MAP_ANONYMOUS :: 0x20;
 MAP_POPULATE :: 0x08000;
 
 ITERATIONS :: 1000;
@@ -60,17 +61,16 @@ COMPUTE_WORK_STATS: Statistics;
 
 pthread_t :: u64;
 
-pthread_mutexattr_t :: union 
-{
-    __size:  [4] u8;
-    __align: s32;
+pthread_attr_t :: union {
+    __size:  [56] u8;
+    __align: s64;
 }
 
 LinuxThread :: AlignStructTo(CACHE_LINE_SIZE, 
 struct
 {
 	index:  u32;
-	handle: *pthread_t;
+	handle: pthread_t;
 	
 	allocator: ArenaAllocator;
 });
@@ -99,7 +99,7 @@ init_arena :: inline (arena: *ArenaAllocator, total_size: s64, temp_size: s64)
 {
 	assert(total_size > temp_size);
 	
-	memory := mmap(null, cast(u64)total_size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_POPULATE, 0, 0);
+	memory := mmap(null, cast(u64)total_size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
 	assert(memory != cast(*void)-1);
 	
 	main_size := total_size - temp_size;
@@ -107,7 +107,7 @@ init_arena :: inline (arena: *ArenaAllocator, total_size: s64, temp_size: s64)
 	arena.temp = .{memory + main_size, temp_size, 0};
 }
 
-linux_thread_proc :: (params: *void) -> u32 #c_call
+linux_thread_proc :: (params: *void) -> *void #c_call
 {
 	ctx: #Context;
 	push_context,defer_pop ctx;
@@ -116,7 +116,7 @@ linux_thread_proc :: (params: *void) -> u32 #c_call
 	context.thread_index = thread.index;
 	run_thread(thread.index);
 	
-	return 0;
+	return null;
 }
 
 compute_work :: (geometries: Block(Geometry), thread_count: s64)
@@ -156,10 +156,10 @@ compute_work :: (geometries: Block(Geometry), thread_count: s64)
 
 main :: ()
 {
-	all_thread_count := get_nprocs;
+	all_thread_count := get_nprocs();
 	if all_thread_count > MAX_THREAD_COUNT
 	{
-		all_thread_count = cast(u32)MAX_THREAD_COUNT;
+		all_thread_count = cast(s32)MAX_THREAD_COUNT;
 	}
 
 	// NOTE: excluding the processor running the main thread
@@ -184,12 +184,12 @@ main :: ()
 	for 0..secondary_thread_count-1
 	{
 		thread := New(LinuxThread);
-		thread.index = it;
+		thread.index = cast(u32)it;
 		init_arena(*thread.allocator, thread_memory_size, temp_memory_size);
 		init_thread(thread.index, *thread.allocator);
 		
 		success := pthread_create(*thread.handle, null, linux_thread_proc, thread);
-		assert(success ==  null);
+		assert(success ==  0);
 		
 		threads[it] = thread;
 	}
@@ -204,7 +204,6 @@ main :: ()
 	geometries: Block(Geometry);
 	init_geometry(*geometries, all_thread_count, points, rest, CACHE_LINE_SIZE);
 
-	init_summations(*SUMMATIONS, SUMMATIONS_COUNT);
 	reset_stats(*COMPUTE_WORK_STATS);
 
 	start := rdtsc();
