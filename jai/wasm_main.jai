@@ -28,6 +28,8 @@ WORK_DISPATCHED :: 0;
 PROCESSING_WORK :: 1;
 WORK_COMPLETED  :: 2;
 
+POINT_COUNT     :: 1_000_004;
+
 /////////////////////////////
 
 
@@ -40,9 +42,13 @@ MAIN_ARENA_ALLOCATOR: ArenaAllocator;
 
 CONTEXT: #Context;
 
-GEOMETRY: Geometry;
+GEOMETRIES: Block(Geometry);
+CURRENT, TARGET: WorkCompleted;
+
 DISPATCHED_TASKS_COUNT :s64;
 COMPLETED_TASKS_COUNT  :s64;
+
+SECONDARY_THREAD_COUNT: s64;
 
 /////////////////////////////
 
@@ -123,7 +129,15 @@ init :: (thread_count: s64) #c_call
 		init_thread(it, thread_arena_allocator);
 	}
 	
-	init_geometry(*GEOMETRY, POINTS_COUNT);
+	rest: s64;
+	points := POINT_COUNT / thread_count;
+	if thread_count*points < POINT_COUNT
+	{
+		rest = POINT_COUNT - thread_count*points; 
+	}
+	
+	init_geometry(*GEOMETRIES, thread_count, points, rest, CACHE_LINE_SIZE);
+	SECONDARY_THREAD_COUNT = thread_count-1;
 	
 	INITTED = true;
 }
@@ -154,69 +168,24 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 	{
 		case DISPATCH_WORK;
 		{
-			reset_geometry(*GEOMETRY);
+			for *GEOMETRIES { reset_geometry(it); }
 			
-			COMPLETED_TASKS_COUNT  = 0;
-			DISPATCHED_TASKS_COUNT = (POINTS_COUNT / POINTS_PER_THREAD);
-			
-			amount := 1.0;
-			work_count: s64;
-			while work_count < DISPATCHED_TASKS_COUNT
-			{
-				work: WorkAvailable;
-				work.type = .Geometry;
-				work.geometry.positions = .{POINTS_PER_THREAD, GEOMETRY.positions.data + work_count*POINTS_PER_THREAD};
-				work.geometry.normals   = .{POINTS_PER_THREAD, GEOMETRY.normals\ .data + work_count*POINTS_PER_THREAD};
-				work.geometry.amount = amount;
-				
-				add_work(work, sequentially=false);
-				
-				amount += 1.0;
-				
-				work_count += 1;
-			}
-			
-			// NOTE: working out the rest
-			if work_count*POINTS_PER_THREAD < POINTS_COUNT
-			{
-				offset := work_count*POINTS_PER_THREAD;
-				
-				work: WorkAvailable;
-				work.type = .Geometry;
-				work.geometry.positions = .{POINTS_COUNT - offset, GEOMETRY.positions.data + offset};
-				work.geometry.normals   = .{POINTS_COUNT - offset, GEOMETRY.normals\ .data + offset};
-				work.geometry.amount = amount;
-				
-				add_work(work, sequentially=false);
-				
-				DISPATCHED_TASKS_COUNT += 1;
-			}
+			CURRENT = .{};			
+			push_geometry_work(GEOMETRIES, *TARGET, SECONDARY_THREAD_COUNT);
 			
 			result = WORK_DISPATCHED;		
 		}
 		case CHECK_IF_DONE;
 		{
 			result = PROCESSING_WORK;
-			for *work_per_thread: get_completed_work()
+			for *completed_per_thread: get_completed_work()
 			{
-				COMPLETED_TASKS_COUNT += work_per_thread.geometry_count;
+				CURRENT += completed_per_thread;
 			}
 			
-			work_is_done := COMPLETED_TASKS_COUNT >= DISPATCHED_TASKS_COUNT;
+			work_is_done := CURRENT >= TARGET;
 			if work_is_done {
-				print("COMPLETED_TASKS_COUNT:%\n", COMPLETED_TASKS_COUNT,, allocation=allocation(.Temp));
-				amount := 0.0;
-				for GEOMETRY.positions
-				{
-					if it_index % POINTS_PER_THREAD == 0
-					{
-						amount += 1;
-					}
-					
-					normal   := GEOMETRY.normals[it_index];
-					position := normal*amount;
-					assert(it == position);
-				}
+				check_geometry_work(GEOMETRIES);
 				
 				result = WORK_COMPLETED;
 			}

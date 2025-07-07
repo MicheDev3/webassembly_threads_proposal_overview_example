@@ -508,7 +508,7 @@ debug_break :: () #no_context
 
 sleep :: inline (ms: s64) #no_context
 {
-	usleep(cast(s32)ms);
+	usleep(cast(u32)ms);
 }
 
 start :: (semaphore: *Semaphore, value: s32 = 0) #no_context
