@@ -62,6 +62,8 @@ Statistics :: struct
 	max:   u64;
 	
 	count: u64;
+	
+	std_dev: u64;
 }
 
 /////////////////////////////
@@ -317,6 +319,22 @@ compute_stats :: inline (stats: *Statistics, elapsed: u64)
 	stats.count += 1;
 }
 
+finalize_stats :: inline (stats: *Statistics, datapoints: []u64)
+{
+	stats.avg = stats.avg/stats.count;
+	
+	std_dev: float64;
+	for datapoints
+	{
+		std_dev += square(cast(float64)it - cast(float64)stats.avg);
+	}
+	
+	std_dev /= stats.count;
+	std_dev = sqrt(std_dev);
+	
+	stats.std_dev = cast(u64)std_dev;
+}
+
 /////////////////////////////
 
 
@@ -326,5 +344,6 @@ compute_stats :: inline (stats: *Statistics, elapsed: u64)
 
 #import "Allocator";
 #import "Basic";
+#import "Math";
 
 /////////////////////////////

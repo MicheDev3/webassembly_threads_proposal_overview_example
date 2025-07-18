@@ -6,7 +6,6 @@
 WorkType :: enum
 {
 	Geometry;
-	Summation;
 }
 
 /////////////////////////////
@@ -24,31 +23,21 @@ WorkAvailable :: struct
 	{
 		geometry: struct
 		{
-			using chunk: *Geometry;
+			using chunk: Geometry;
 			amount: float;
 		}
-		summation: *Summation;
 	}
 }
 
 WorkCompleted :: struct
 {
 	geometry_\count: s64;
-	summation_count: s64;
 }
 
-// TODO: Either make sure each work is padded to a cache line (ideal) or
-// pad the Vector3 definition here
 Geometry :: struct
 {
 	positions: Block(Vector3);
 	normals:   Block(Vector3);
-}
-
-Summation :: struct
-{
-	count:  u64;
-	result: u64;
 }
 
 /////////////////////////////
@@ -62,8 +51,6 @@ operator == :: inline (lhs: $T/WorkCompleted, rhs: T) -> bool
 {
     result := (
         lhs.geometry_\count == rhs.geometry_\count
-        &&
-        lhs.summation_count == rhs.summation_count
     );
     
     return result;
@@ -73,8 +60,6 @@ operator >= :: inline (lhs: $T/WorkCompleted, rhs: T) -> bool
 {
     result := (
         lhs.geometry_\count >= rhs.geometry_\count
-        &&
-        lhs.summation_count >= rhs.summation_count
     );
     
     return result;
@@ -84,7 +69,6 @@ operator + :: inline (lhs: $T/WorkCompleted, rhs: T) -> T
 {
     result: T = ---;
     result.geometry_\count = lhs.geometry_\count + rhs.geometry_\count;
-    result.summation_count = lhs.summation_count + rhs.summation_count;
     
     return result;
 }
@@ -92,7 +76,6 @@ operator + :: inline (lhs: $T/WorkCompleted, rhs: T) -> T
 operator += :: inline (lhs: *$T/WorkCompleted, rhs: T)
 {
     lhs.geometry_\count += rhs.geometry_\count;
-    lhs.summation_count += rhs.summation_count;
 }
 
 /////////////////////////////
@@ -107,15 +90,16 @@ init_geometry :: (geometries: *Block(Geometry), chunks: s64, points: s64, rest: 
 	reserve(geometries, chunks);
 	for *geometries
 	{
-		count := ifx rest != 0 && it_index == geometries.count - 1 then points + rest else points;
+		count := ifx rest != 0 && it_index == 0 then points + rest else points;
 		reserve(*it.positions, count,, allocation=allocation(.Main, alignment));
 		reserve(*it.normals,   count,, allocation=allocation(.Main, alignment));
 	}
 }
 
-init_summations :: (summations: *Block(Summation), count: s64)
+init_geometry :: (geometry: *Geometry, count: s64)
 {
-	reserve(summations, count);
+	reserve(*geometry.positions, count);
+	reserve(*geometry.normals,   count);
 }
 
 reset_geometry :: (geometry: *Geometry)
@@ -124,53 +108,69 @@ reset_geometry :: (geometry: *Geometry)
 	for *geometry.normals   { it.* = .{1, 1, 1}; }
 }
 
-reset_summations :: (summations: *Block(Summation))
-{
-	for *summations { it.* = .{}; }
-}
-
-push_geometry_work :: (geometries: Block(Geometry), completed: *WorkCompleted, secondary_thread_count: s64)
-{
-	amount := 1.0; work_count: s64;
-	while work_count < secondary_thread_count
-	{
-		work: WorkAvailable;
-		work.type = .Geometry;
-		work.geometry.chunk = *geometries[work_count];
-		work.geometry.amount = amount;
-		
-		add_work(work, sequentially=true);
-		
-		amount += 1.0;
-		
-		work_count += 1;
-	}
-	
-	if geometries.count > secondary_thread_count
-	{
-		work: WorkAvailable;
-		work.type = .Geometry;
-		work.geometry.chunk = *geometries[work_count];
-		work.geometry.amount = amount;
-		
-		process_available_work(*work);
-	}
-	
-	completed.geometry_count = secondary_thread_count;
-}
-
-check_geometry_work :: (geometries: Block(Geometry))
+push_geometry_work :: (geometries: Block(Geometry), completed: *WorkCompleted, amount: float)
 {
 	for geometries
 	{
-		normals   := it.normals;
-		positions := it.positions;
-		amount := cast(float)(it_index+1);
-		for positions
+		work: WorkAvailable;
+		work.type = .Geometry;
+		work.geometry.chunk = it;
+		work.geometry.amount = amount;
+		
+		add_work(work, sequentially=true);
+	}
+	
+	completed.geometry_count = geometries.count;
+}
+
+check_geometry_work :: (geometries: Block(Geometry), amount: float)
+{
+	for geometry: geometries
+	{
+		normals   := geometry.normals;
+		positions := geometry.positions;
+		for found: positions
 		{
-			position := normals[it_index]*amount;
-			assert(it == position);
+			expected := normals[it_index]*amount;
+			assert(found == expected);
 		}
+	}
+}
+
+push_geometry_work :: 
+(
+	geometry: Geometry,
+	completed: *WorkCompleted,
+	work_count: s64,
+	points: s64,
+	rest: s64,
+	amount: float
+)
+{
+	for 0..work_count-1
+	{
+		work: WorkAvailable;
+		work.type = .Geometry;
+		
+		count :=  ifx rest != 0 && it == 0 then points + rest else points;
+		offset := ifx rest != 0 && it != 0 then (points*it) + rest else (points*it);
+		
+		work.geometry.chunk.positions = .{count, geometry.positions.data + offset};
+		work.geometry.chunk.normals   = .{count, geometry.normals  .data + offset};
+		work.geometry.amount = amount;
+		
+		add_work(work, sequentially=true);
+	}
+	
+	completed.geometry_count = work_count;
+}
+
+check_geometry_work :: (geometry: Geometry, amount: float)
+{
+	for found: geometry.positions
+	{
+		expected := geometry.normals[it_index]*amount;
+		assert(found == expected);
 	}
 }
 
@@ -184,23 +184,38 @@ process_available_work :: (available: *void)
 		{
 			geometry := a.geometry;
 			
-			for geometry.normals
-			{
-				position := it*geometry.amount;
-				geometry.positions[it_index] += position;
-			}
-		}
-		case .Summation;
-		{
-			summation := a.summation;
+			count  := 0;
+			amount := geometry.amount;
 			
-			result: u64;
-			for 1..summation.count
+			positions := geometry.positions;
+			normals   := geometry.normals;
+#if SIMD
+{
+			amount_4x := toM128(amount);
+			iterations := (normals.count / LANES);
+			while count < iterations 
 			{
-				result += it;
+				defer count += 1;
+				
+				p := positions.data + (count*LANES);
+				n := normals.data   + (count*LANES);
+				
+				position_4x := toVector34x(p[0], p[1], p[2], p[3]);
+				normal\ _4x := toVector34x(n[0], n[1], n[2], n[3]);
+				
+				computed := position_4x + (normal_4x*amount_4x);
+				
+				p[0] = .{computed.x[0], computed.y[0], computed.z[0]};
+				p[1] = .{computed.x[1], computed.y[1], computed.z[1]};
+				p[2] = .{computed.x[2], computed.y[2], computed.z[2]};
+				p[3] = .{computed.x[3], computed.y[3], computed.z[3]};
 			}
-			
-			summation.result = result;
+}		
+
+			for count*LANES..positions.count-1 
+			{
+				positions[it] += normals[it]*amount;
+			}
 		}
 	}
 }
@@ -215,10 +230,6 @@ process_completed_work :: (available: *void, completed: *void)
 		case .Geometry;
 		{
 			c.geometry_\count += 1;
-		}
-		case .Summation;
-		{
-			c.summation_count += 1;
 		}
 	}
 }

@@ -561,7 +561,7 @@ init_synchronization :: () #no_context
 
 CONSOLE_LOCK: Mutex;
 
-libc     :: #library,system "libc";
+libc       :: #library,system "libc";
 libpthread :: #library,system "libpthread";
 
 sem_t :: union 
@@ -569,7 +569,6 @@ sem_t :: union
     size:  [32] u8;
     align: s64;
 }
-
 
 write  :: (fd: s32, buf: *void, count: u64) -> s64 #foreign libc;
 usleep :: (__useconds: u32)                 -> s32 #foreign libc;
@@ -587,7 +586,8 @@ write_string_unsynchronized :: (s: string, to_standard_error := false) #no_conte
 	handle := ifx to_standard_error then STDERR_FILENO else STDOUT_FILENO;
 	
 	written: s64;
-	while written != s.count {
+	while written != s.count 
+	{
 		result := write(handle, s.data + written, cast(u64) (s.count - written));
 		// We should probably be checking errno for failures,
 		// but, on macOS at least, we seem to be getting interrupted

@@ -102,6 +102,29 @@ ThreadGroup :: struct
 
 
 /////////////////////////////
+// Macros
+/////////////////////////////
+
+GET_COMPLETE_WORK :: (code: Code) #expand
+{
+	assert(THREAD_GROUP.initted);
+
+	for *thread: THREAD_GROUP.threads
+	{
+PUSH_LOCK(*thread.completed_mutex, #code
+{
+		`completed := thread.completed;
+		thread.completed = .{};
+});
+
+		#insert code;
+	}
+}
+
+/////////////////////////////
+
+
+/////////////////////////////
 // Functions
 /////////////////////////////
 
@@ -253,25 +276,6 @@ PUSH_LOCK(*thread.completed_mutex, #code
 
 		FREE(.Temp);
 	}
-}
-
-get_completed_work :: () -> Array(WorkCompleted, MAX_THREAD_COUNT-1)
-{
-	assert(THREAD_GROUP.initted);
-
-	result: Array(WorkCompleted, MAX_THREAD_COUNT-1);
-	for *thread: THREAD_GROUP.threads
-	{
-		completed := insert(*result);
-
-PUSH_LOCK(*thread.completed_mutex, #code
-{
-		completed.* = thread.completed;
-		thread.completed = .{};
-});
-	}
-	
-	return result;
 }
 
 shutdown :: inline (wait_for_termination: bool = true)
