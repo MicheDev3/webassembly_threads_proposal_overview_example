@@ -1,4 +1,3 @@
-#assert(OS == .WINDOWS || OS == .LINUX);
 
 /////////////////////////////
 // Loads
@@ -27,6 +26,7 @@ SIMD :: true;
 // NOTE: By default RUN_CHECK_GEOMETRY_WORK is disable as it will decrease performance
 // quite a lot. I think because it is polluting the cache
 RUN_CHECK_GEOMETRY_WORK :: false;
+PRINT_ITERATION_TIMES   :: false;
 
 /////////////////////////////
 
@@ -282,7 +282,10 @@ perform_statistics :: (datapoints: []u64) -> Statistics
 	reset_stats(*result);
 	for datapoints
 	{
-		// print("ITERATION(%) = %\n", FormatInt.{value=it_index+1, minimum_digits=4}, it,, allocation=allocation(.Temp));
+#if PRINT_ITERATION_TIMES
+{
+		print("ITERATION(%) = %\n", FormatInt.{value=it_index+1, minimum_digits=4}, it,, allocation=allocation(.Temp));
+}
 		compute_stats(*result, it);
 	}
 	

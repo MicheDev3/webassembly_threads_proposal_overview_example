@@ -145,16 +145,16 @@ platform_init_threads :PlatformInitThreads:
 		init_thread(thread.index, *thread.allocator);
 		
 		success = pthread_attr_init(*thread.attr) == 0;
-		if !success { break }
+		if !success { break; }
 		
 		success = pthread_attr_setschedpolicy(*thread.attr, SCHED_FIFO) == 0;
-		if !success { break }
+		if !success { break; }
 		
 		success = pthread_attr_setschedparam(*thread.attr, *thread.param) == 0;
-		if !success { break }
+		if !success { break; }
 
 		success = pthread_create(*thread.handle, *thread.attr, linux_thread_proc, thread) == 0;
-		if !success { break }
+		if !success { break; }
 		
 		result[it] = thread;
 	}
