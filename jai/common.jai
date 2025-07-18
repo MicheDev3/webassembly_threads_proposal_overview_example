@@ -15,6 +15,20 @@ WorkType :: enum
 // Structs
 /////////////////////////////
 
+Vector34x :: struct
+{
+	x: M128;
+	y: M128;
+	z: M128;
+}
+
+Vector38x :: struct
+{
+	x: M256;
+	y: M256;
+	z: M256;
+}
+
 WorkAvailable :: struct
 {
 	type: WorkType;
@@ -46,6 +60,66 @@ Geometry :: struct
 /////////////////////////////
 // Operators
 /////////////////////////////
+
+operator + :: inline (lhs: Vector34x, rhs: Vector34x) -> Vector34x #no_abc #no_aoc
+{
+	result: Vector34x = ---;
+	result.x = addps(lhs.x, rhs.x);
+	result.y = addps(lhs.y, rhs.y);
+	result.z = addps(lhs.z, rhs.z);
+	
+	return result;
+}
+
+operator * :: inline (lhs: Vector34x, rhs: Vector34x) -> Vector34x
+{
+	result: Vector34x = ---;
+	result.x = mulps(lhs.x, rhs.x);
+	result.y = mulps(lhs.y, rhs.y);
+	result.z = mulps(lhs.z, rhs.z);
+	
+	return result;
+}
+
+operator * :: inline (lhs: Vector34x, rhs: M128) -> Vector34x
+{
+	result: Vector34x = ---;
+	result.x = mulps(lhs.x, rhs);
+	result.y = mulps(lhs.y, rhs);
+	result.z = mulps(lhs.z, rhs);
+	
+	return result;
+}
+
+operator + :: inline (lhs: Vector38x, rhs: Vector38x) -> Vector38x #no_abc #no_aoc
+{
+	result: Vector38x = ---;
+	result.x = addps(lhs.x, rhs.x);
+	result.y = addps(lhs.y, rhs.y);
+	result.z = addps(lhs.z, rhs.z);
+	
+	return result;
+}
+
+operator * :: inline (lhs: Vector38x, rhs: Vector38x) -> Vector38x
+{
+	result: Vector38x = ---;
+	result.x = mulps(lhs.x, rhs.x);
+	result.y = mulps(lhs.y, rhs.y);
+	result.z = mulps(lhs.z, rhs.z);
+	
+	return result;
+}
+
+operator * :: inline (lhs: Vector38x, rhs: M256) -> Vector38x
+{
+	result: Vector38x = ---;
+	result.x = mulps(lhs.x, rhs);
+	result.y = mulps(lhs.y, rhs);
+	result.z = mulps(lhs.z, rhs);
+	
+	return result;
+}
 
 operator == :: inline (lhs: $T/WorkCompleted, rhs: T) -> bool
 {
@@ -91,25 +165,58 @@ UPDATE_GEOMETRY :: () #expand
 	normals   := `geometry.normals;
 #if SIMD
 {
-	amount_4x := toM128(`amount);
-	iterations := (normals.count / LANES);
-	while `count < iterations
-	{
-		defer `count += 1;
-		
-		p := positions.data + (`count*LANES);
-		n := normals.data   + (`count*LANES);
-		
-		position_4x := toVector34x(p[0], p[1], p[2], p[3]);
-		normal\ _4x := toVector34x(n[0], n[1], n[2], n[3]);
-		
-		computed := position_4x + (normal_4x*amount_4x);
-		
-		p[0] = .{computed.x[0], computed.y[0], computed.z[0]};
-		p[1] = .{computed.x[1], computed.y[1], computed.z[1]};
-		p[2] = .{computed.x[2], computed.y[2], computed.z[2]};
-		p[3] = .{computed.x[3], computed.y[3], computed.z[3]};
-	}
+
+#if LANES ==
+{
+	case 4;
+		amount_4x := toM128(`amount);
+		iterations := (normals.count / LANES);
+		while `count < iterations
+		{
+			defer `count += 1;
+			
+			p := positions.data + (`count*LANES);
+			n := normals.data   + (`count*LANES);
+			
+			position_4x := toVector34x(p[0], p[1], p[2], p[3]);
+			normal\ _4x := toVector34x(n[0], n[1], n[2], n[3]);
+			
+			computed := position_4x + (normal_4x*amount_4x);
+			
+			p[0] = .{computed.x[0], computed.y[0], computed.z[0]};
+			p[1] = .{computed.x[1], computed.y[1], computed.z[1]};
+			p[2] = .{computed.x[2], computed.y[2], computed.z[2]};
+			p[3] = .{computed.x[3], computed.y[3], computed.z[3]};
+		}
+	case 8;
+		// TODO: This now is too slow, reengineer the system to use AVX?
+		amount_8x := toM256(`amount);
+		iterations := (normals.count / LANES);
+		while `count < iterations
+		{
+			defer `count += 1;
+			
+			p := positions.data + (`count*LANES);
+			n := normals.data   + (`count*LANES);
+			
+			position_8x := toVector38x(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+			normal\ _8x := toVector38x(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7]);
+			
+			computed := position_8x + (normal_8x*amount_8x);
+			
+			p[0] = .{computed.x[0], computed.y[0], computed.z[0]};
+			p[1] = .{computed.x[1], computed.y[1], computed.z[1]};
+			p[2] = .{computed.x[2], computed.y[2], computed.z[2]};
+			p[3] = .{computed.x[3], computed.y[3], computed.z[3]};
+			p[4] = .{computed.x[4], computed.y[4], computed.z[4]};
+			p[5] = .{computed.x[5], computed.y[5], computed.z[5]};
+			p[6] = .{computed.x[6], computed.y[6], computed.z[6]};
+			p[7] = .{computed.x[7], computed.y[7], computed.z[7]};
+		}
+	case;
+		#assert(false);
+}
+
 }		
 
 	for `count*LANES..positions.count-1 
@@ -124,6 +231,42 @@ UPDATE_GEOMETRY :: () #expand
 /////////////////////////////
 // Functions
 /////////////////////////////
+
+toVector34x :: inline 
+(
+	v0: Vector3,
+	v1: Vector3,
+	v2: Vector3,
+	v3: Vector3
+) -> Vector34x
+{
+	result: Vector34x = ---;
+	result.x = toM128(v0.x, v1.x, v2.x, v3.x);
+	result.y = toM128(v0.y, v1.y, v2.y, v3.y);
+	result.z = toM128(v0.z, v1.z, v2.z, v3.z);
+	
+	return result;
+}
+
+toVector38x :: inline
+(
+	v0: Vector3,
+	v1: Vector3,
+	v2: Vector3,
+	v3: Vector3,
+	v4: Vector3,
+	v5: Vector3,
+	v6: Vector3,
+	v7: Vector3
+) -> Vector38x
+{
+	result: Vector38x = ---;
+	result.x = toM256(v0.x, v1.x, v2.x, v3.x, v4.x, v5.x, v6.x, v7.x);
+	result.y = toM256(v0.y, v1.y, v2.y, v3.y, v4.y, v5.y, v6.y, v7.y);
+	result.z = toM256(v0.z, v1.z, v2.z, v3.z, v4.z, v5.z, v6.z, v7.z);
+	
+	return result;
+}
 
 init_geometry :: (geometries: *Block(Geometry), chunks: s64, points: s64, rest: s64, alignment: s64)
 {

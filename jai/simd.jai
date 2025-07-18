@@ -1,73 +1,78 @@
-// TODO: This is a temporary solution for experimenting with SIMD
 
-#assert(OS != .WASM);
 
-LANES :: 4;
+/////////////////////////////
+// Structs
+/////////////////////////////
 
-M128 :: [LANES]float;
+/////////////////////////////
 
-Vector34x :: struct
+
+/////////////////////////////
+// Types
+/////////////////////////////
+
+M128 :: [4]f32;
+M256 :: [8]f32;
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Operators
+/////////////////////////////
+
+/////////////////////////////
+
+
+/////////////////////////////
+// Functions
+/////////////////////////////
+
+toM128 :: inline (v0: f32) -> M128
 {
-	x: M128;
-	y: M128;
-	z: M128;
-}
-
-toM128 :: inline (value: float) -> M128
-{
-	result: M128 = .[value, value, value, value];
+	result: M128 = .[v0, v0, v0, v0];
 	
 	return result;
 }
 
-toM128 :: inline (v0: float, v1: float, v2: float, v3: float) -> M128
+toM128 :: inline
+(
+	v0: f32 = 0,
+	v1: f32 = 0,
+	v2: f32 = 0,
+	v3: f32 = 0
+) -> M128
 {
 	result: M128 = .[v0, v1, v2, v3];
 	
 	return result;
 }
 
-toVector34x :: inline (v0: Vector3, v1: Vector3, v2: Vector3, v3: Vector3) -> Vector34x
+toM256 :: inline (v0: f32) -> M256
 {
-	result: Vector34x = ---;
-	result.x = toM128(v0.x, v1.x, v2.x, v3.x);
-	result.y = toM128(v0.y, v1.y, v2.y, v3.y);
-	result.z = toM128(v0.z, v1.z, v2.z, v3.z);
+	result: M256 = .[v0, v0, v0, v0, v0, v0, v0, v0];
 	
 	return result;
 }
 
-operator + :: inline (lhs: Vector34x, rhs: Vector34x) -> Vector34x #no_abc #no_aoc
+toM256 :: inline
+(
+	v0: f32 = 0,
+	v1: f32 = 0,
+	v2: f32 = 0,
+	v3: f32 = 0,
+	v4: f32 = 0,
+	v5: f32 = 0,
+	v6: f32 = 0,
+	v7: f32 = 0
+) -> M256
 {
-	result: Vector34x = ---;
-	result.x = add(lhs.x, rhs.x);
-	result.y = add(lhs.y, rhs.y);
-	result.z = add(lhs.z, rhs.z);
+	result: M256 = .[v0, v1, v2, v3, v4, v5, v6, v7];
 	
 	return result;
 }
 
-operator * :: inline (lhs: Vector34x, rhs: Vector34x) -> Vector34x
-{
-	result: Vector34x = ---;
-	result.x = mul(lhs.x, rhs.x);
-	result.y = mul(lhs.y, rhs.y);
-	result.z = mul(lhs.z, rhs.z);
-	
-	return result;
-}
-
-operator * :: inline (lhs: Vector34x, rhs: M128) -> Vector34x
-{
-	result: Vector34x = ---;
-	result.x = mul(lhs.x, rhs);
-	result.y = mul(lhs.y, rhs);
-	result.z = mul(lhs.z, rhs);
-	
-	return result;
-}
-
-add :: inline (lhs: M128, rhs: M128) -> M128 #no_abc #no_aoc
+addps :: inline (lhs: M128, rhs: M128) -> M128 #no_abc #no_aoc
 {
 	result: M128 = lhs;
 	#asm
@@ -78,7 +83,27 @@ add :: inline (lhs: M128, rhs: M128) -> M128 #no_abc #no_aoc
 	return result;
 }
 
-mul :: inline (lhs: M128, rhs: M128) -> M128 #no_abc #no_aoc
+addps :: inline (lhs: M256, rhs: M256) -> M256 #no_abc #no_aoc
+{
+	result: M256 = ---;
+	
+	res_data := result.data;
+	lhs_data := lhs.data;
+	rhs_data := rhs.data;
+	#asm AVX, AVX2
+	{
+		movdqu snd:, [lhs_data];
+		movdqu trd:, [rhs_data];
+		
+		addps fst:, snd, trd;
+		
+		movdqu [res_data], fst;
+	}
+	
+	return result;
+}
+
+mulps :: inline (lhs: M128, rhs: M128) -> M128 #no_abc #no_aoc
 {
 	result: M128 = lhs;
 	#asm
@@ -89,3 +114,24 @@ mul :: inline (lhs: M128, rhs: M128) -> M128 #no_abc #no_aoc
 	return result;
 }
 
+mulps :: inline (lhs: M256, rhs: M256) -> M256 #no_abc #no_aoc
+{
+	result: M256 = ---;
+	
+	res_data := result.data;
+	lhs_data := lhs.data;
+	rhs_data := rhs.data;
+	#asm AVX, AVX2
+	{
+		movdqu snd:, [lhs_data];
+		movdqu trd:, [rhs_data];
+		
+		mulps fst:, snd, trd;
+		
+		movdqu [res_data], fst;
+	}
+	
+	return result;
+}
+
+/////////////////////////////

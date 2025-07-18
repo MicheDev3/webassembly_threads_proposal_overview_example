@@ -30,8 +30,8 @@ WORK_COMPLETED  :: 2;
 
 POINT_COUNT     :: 1_000_004;
 
-SIMD  :: false;
 LANES :: 0;
+SIMD  :: false;
 
 /////////////////////////////
 

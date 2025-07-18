@@ -21,7 +21,8 @@ POINT_COUNT :: 1_000_004;
 
 POINTS_IN_SINGLE_CHUNK :: false;
 
-SIMD :: true;
+LANES :: 4;
+SIMD  :: true;
 
 // NOTE: By default RUN_CHECK_GEOMETRY_WORK is disable as it will decrease performance
 // quite a lot. I think because it is polluting the cache
@@ -80,7 +81,7 @@ single_threaded_test :: (page_size: s64) -> Statistics
 	}
 	
 	result := perform_statistics(datapoints, false);
-	print("Process % iterations (POINT_COUNT=%, THREADS=%, SIMD=%, POINTS_IN_SINGLE_CHUNK=%, RUN_CHECK_GEOMETRY_WORK=%)\n", ITERATIONS, POINT_COUNT, 0, SIMD, false, RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
+	print("Process % iterations (POINT_COUNT=%, THREADS=%, SIMD=%, LANES=%, POINTS_IN_SINGLE_CHUNK=%, RUN_CHECK_GEOMETRY_WORK=%)\n", ITERATIONS, POINT_COUNT, 0, SIMD, LANES, false, RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
 	print("    time elapsed to complete work: \n",, allocation=allocation(.Temp));
 	print("        - min = %\n", result.min      ,, allocation=allocation(.Temp));
 	print("        - avg = %\n", result.avg      ,, allocation=allocation(.Temp));
@@ -177,7 +178,7 @@ else
 	// print_thread_group_stats(,, allocation=allocation(.Temp));
 	
 	result := perform_statistics(datapoints, PRINT_ITERATION_TIMES);
-	print("Process % iterations (POINT_COUNT=%, THREADS=%, SIMD=%, POINTS_IN_SINGLE_CHUNK=%, RUN_CHECK_GEOMETRY_WORK=%)\n", ITERATIONS, POINT_COUNT, secondary_thread_count, SIMD, POINTS_IN_SINGLE_CHUNK, RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
+	print("Process % iterations (POINT_COUNT=%, THREADS=%, SIMD=%, LANES=%, POINTS_IN_SINGLE_CHUNK=%, RUN_CHECK_GEOMETRY_WORK=%)\n", ITERATIONS, POINT_COUNT, secondary_thread_count, SIMD, LANES, POINTS_IN_SINGLE_CHUNK, RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
 	print("    time elapsed to complete work: \n",, allocation=allocation(.Temp));
 	print("        - min = %\n", result.min      ,, allocation=allocation(.Temp));
 	print("        - avg = %\n", result.avg      ,, allocation=allocation(.Temp));
