@@ -22,12 +22,14 @@ libpthread :: #library,system "libpthread";
 // Constants
 /////////////////////////////
 
-PROT_READ    :: 0x1;
-PROT_WRITE   :: 0x2;
+SCHED_FIFO    :: 1;
 
-MAP_SHARED   :: 0x01;
+PROT_READ     :: 0x1;
+PROT_WRITE    :: 0x2;
+
+MAP_SHARED    :: 0x01;
 MAP_ANONYMOUS :: 0x20;
-MAP_POPULATE :: 0x08000;
+MAP_POPULATE  :: 0x08000;
 
 /////////////////////////////
 
@@ -52,16 +54,25 @@ MAP_POPULATE :: 0x08000;
 
 pthread_t :: u64;
 
-pthread_attr_t :: union {
+pthread_attr_t :: union
+{
     __size:  [56] u8;
     __align: s64;
 }
 
-LinuxThread :: AlignStructTo(CACHE_LINE_SIZE, 
+sched_param :: struct
+{
+    sched_priority: s32;
+}
+
+PlatformThread :: AlignStructTo(CACHE_LINE_SIZE, 
 struct
 {
 	index:  u32;
 	handle: pthread_t;
+	
+	attr: pthread_attr_t;
+	param: sched_param;
 	
 	allocator: ArenaAllocator;
 });
@@ -78,6 +89,11 @@ mmap           :: (__addr: *void, __len: u64, __prot: s32, __flags: s32, __fd: s
 
 pthread_create :: (__newthread: *pthread_t, __attr: *pthread_attr_t, __start_routine: #type (unknown0: *void) -> *void #c_call, __arg: *void) -> s32   #foreign libpthread;
 pthread_join   :: (__th: pthread_t, __thread_return: **void)                                                                                  -> s32   #foreign libpthread;
+
+pthread_attr_init           :: (__attr: *pthread_attr_t)                                                                                      -> s32   #foreign libpthread;
+pthread_attr_setschedpolicy :: (__attr: *pthread_attr_t, __policy: s32)                                                                       -> s32   #foreign libpthread;
+pthread_attr_setschedparam  :: (__attr: *pthread_attr_t, __param: *sched_param)                                                               -> s32   #foreign libpthread;
+
 
 /////////////////////////////
 
@@ -103,11 +119,55 @@ linux_thread_proc :: (params: *void) -> *void #c_call
 	ctx: #Context;
 	push_context,defer_pop ctx;
 	
-	thread: *LinuxThread = params;
+	thread: *PlatformThread = params;
 	context.thread_index = thread.index;
 	run_thread(thread.index);
 	
 	return null;
+}
+
+platform_init_threads :PlatformInitThreads: 
+(
+	thread_count: u32,
+	main_memory_size: s64,
+	temp_memory_size: s64
+) -> bool, Block(PlatformThread)
+{
+	success: bool = true;
+	result: Block(PlatformThread);
+	reserve(*result, thread_count);
+	for 0..thread_count-1
+	{
+		thread := New(PlatformThread);
+		thread.index = cast(u32)it;
+		thread.param.sched_priority = 10;
+		init_arena(*thread.allocator, main_memory_size, temp_memory_size);
+		init_thread(thread.index, *thread.allocator);
+		
+		success = pthread_attr_init(*thread.attr) == 0;
+		if !success { break }
+		
+		success = pthread_attr_setschedpolicy(*thread.attr, SCHED_FIFO) == 0;
+		if !success { break }
+		
+		success = pthread_attr_setschedparam(*thread.attr, *thread.param) == 0;
+		if !success { break }
+
+		success = pthread_create(*thread.handle, *thread.attr, linux_thread_proc, thread) == 0;
+		if !success { break }
+		
+		result[it] = thread;
+	}
+	
+	return success, result;
+}
+
+platform_fini_threads :PlatformFiniThreads: (threads: Block(PlatformThread))
+{
+	for threads
+	{
+		pthread_join(it.handle, null);
+	}
 }
 
 /////////////////////////////
@@ -121,10 +181,10 @@ main :: ()
 {
 	page_size := KIBIBYTES(4);
 	
-	all_thread_count := get_nprocs();
+	core_count := cast(u32)get_nprocs();
 
 	single_threaded_stats := single_threaded_test(page_size);
-	multi\_threaded_stats := multi\_threaded_test(all_thread_count, page_size);
+	multi\_threaded_stats := multi\_threaded_test(core_count, page_size);
 	
 	print("Average gain: %\n", (single_threaded_stats.avg - multi\_threaded_stats.avg) /  multi\_threaded_stats.avg,, allocation=allocation(.Temp));
 	

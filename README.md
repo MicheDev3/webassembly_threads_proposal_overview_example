@@ -11,9 +11,9 @@ Build Parameters:
 	- wasm-toolchain-path: wasm toolchain. Required
 	- wasm-nr-pages: how many pages the wasm memory will have. Default = 10000
 
-e.g: `jai jai/build.jai - -internal -platform wasm -wasm-toolchain-path "/home/gui/Downloads/wabt-1.0.37-ubuntu-20.04/wabt-1.0.37/bin"  -max-thread-count 16`
-
-NOTE: Linux native implementation is not currently implemented
+e.g: `jai jai/build.jai - -optimise -platform wasm -max-thread-count 16 -wasm-toolchain-path "/home/gui/Downloads/wabt-1.0.37-ubuntu-20.04/wabt-1.0.37/bin"`
+e.g: `jai jai/build.jai - -optimise -backend llvm -platform win64 -max-thread-count 32`
+e.g: `jai jai/build.jai - -optimise -backend llvm -platform linux -max-thread-count 24`
 
 # Wasm
 

@@ -32,6 +32,21 @@ RUN_CHECK_GEOMETRY_WORK :: false;
 
 
 /////////////////////////////
+// Types
+/////////////////////////////
+
+PlatformInitThreads :: #type 
+(
+	thread_count: u32,
+	main_memory_size: s64,
+	temp_memory_size: s64
+) -> bool, Block(PlatformThread);
+PlatformFiniThreads :: #type (threads: Block(PlatformThread));
+
+/////////////////////////////
+
+
+/////////////////////////////
 // Functions
 /////////////////////////////
 
@@ -125,43 +140,20 @@ multi_threaded_test :: (all_thread_count: u32, page_size: s64) -> Statistics
 	seed := current_time_monotonic();
 	init_thread_group(enable_logging=true, cast(u64)seed.high);
 
-#if OS ==
-{
-	case .WINDOWS;
-		threads: Block(Win64Thread);
-		reserve(*threads, secondary_thread_count);
-		for 0..secondary_thread_count-1
-		{
-			thread := New(Win64Thread);
-			thread.index = it;
-			init_arena(*thread.allocator, thread_memory_size, temp_memory_size);
-			init_thread(thread.index, *thread.allocator);
-			
-			ignored: s32;
-			handle := _beginthreadex(null, 0, cast(*void)win64_thread_proc, thread, REALTIME_PRIORITY_CLASS, *ignored);
-			assert(handle != null);
-			
-			thread.handle = cast(*void)handle;
-			threads[it] = thread;
-		}
-	case .LINUX;
-		threads: Block(LinuxThread);
-		reserve(*threads, secondary_thread_count);
-		for 0..secondary_thread_count-1
-		{
-			thread := New(LinuxThread);
-			thread.index = cast(u32)it;
-			init_arena(*thread.allocator, thread_memory_size, temp_memory_size);
-			init_thread(thread.index, *thread.allocator);
-			
-			success := pthread_create(*thread.handle, null, linux_thread_proc, thread);
-			assert(success ==  0);
-			
-			threads[it] = thread;
-		}
-	case;
-		assert(false, "Unknown or unsupported os");
-}
+	success, threads := platform_init_threads(secondary_thread_count, thread_memory_size, temp_memory_size);
+	defer
+	{
+		shutdown();
+
+		platform_fini_threads(threads);
+	}
+	
+	if !success
+	{
+		print("Failed to create threads\n",, allocation=allocation(.Temp));
+		return .{};
+	}
+	
 	// work_count: s64 = secondary_thread_count;
 	
 	// rest: s64;
@@ -211,24 +203,6 @@ else
 	}
 	// TODO: Think more about how to time performance
 	// print_thread_group_stats(,, allocation=allocation(.Temp));
-	
-	shutdown();
-	
-#if OS ==
-{
-	case .WINDOWS;
-		for threads
-		{
-			CloseHandle(it.handle);
-		}
-	case .LINUX;
-		for threads
-		{
-			pthread_join(it.handle, null);
-		}
-	case;
-		assert(false, "Unknown or unsupported os");
-}
 	
 	result := perform_statistics(datapoints);
 	print("Process % iterations (POINT_COUNT=%, THREADS=%, SIMD=%, POINTS_IN_SINGLE_CHUNK=%, RUN_CHECK_GEOMETRY_WORK=%)\n", ITERATIONS, POINT_COUNT, secondary_thread_count, SIMD, POINTS_IN_SINGLE_CHUNK, RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));

@@ -99,7 +99,7 @@ using Creation_Flags :: enum_flags u32
 // Structs
 /////////////////////////////
 
-Win64Thread :: AlignStructTo(CACHE_LINE_SIZE, 
+PlatformThread :: AlignStructTo(CACHE_LINE_SIZE, 
 struct
 {
 	index:  u32;
@@ -157,12 +157,49 @@ win64_thread_proc :: (params: *void) -> u32 #c_call
 	ctx: #Context;
 	push_context,defer_pop ctx;
 	
-	thread: *Win64Thread = params;
+	thread: *PlatformThread = params;
 	context.thread_index = thread.index;
 	run_thread(thread.index);
 	
 	_endthreadex(0);
 	return 0;
+}
+
+platform_init_threads :PlatformInitThreads: 
+(
+	thread_count: u32,
+	main_memory_size: s64,
+	temp_memory_size: s64
+) -> bool, Block(PlatformThread)
+{
+	success: bool = true;
+	result: Block(PlatformThread);
+	reserve(*result, thread_count);
+	for 0..thread_count-1
+	{
+		thread := New(PlatformThread);
+		thread.index = it;
+		init_arena(*thread.allocator, main_memory_size, temp_memory_size);
+		init_thread(thread.index, *thread.allocator);
+		
+		ignored: s32;
+		handle := _beginthreadex(null, 0, cast(*void)win64_thread_proc, thread, REALTIME_PRIORITY_CLASS, *ignored);
+		success = handle != null;
+		if !success { break; }
+		
+		thread.handle = cast(*void)handle;
+		result[it] = thread;
+	}
+	
+	return success, result;
+}
+
+platform_fini_threads :PlatformFiniThreads: (threads: Block(PlatformThread))
+{
+	for threads
+	{
+		CloseHandle(it.handle);
+	}
 }
 
 /////////////////////////////
@@ -178,10 +215,10 @@ main :: ()
 	// https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getlogicalprocessorinformation
 	page_size := KIBIBYTES(4);
 	
-	all_thread_count := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+	core_count := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
 	
 	single_threaded_stats := single_threaded_test(page_size);
-	multi\_threaded_stats := multi\_threaded_test(all_thread_count, page_size);
+	multi\_threaded_stats := multi\_threaded_test(core_count, page_size);
 	
 	print("Average gain: %\n", (single_threaded_stats.avg - multi\_threaded_stats.avg) /  multi\_threaded_stats.avg,, allocation=allocation(.Temp));
 	
