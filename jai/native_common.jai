@@ -72,42 +72,14 @@ single_threaded_test :: (page_size: s64) -> Statistics
 		count  := 0;
 		amount := 1.0;
 
-		positions := geometry.positions;
-		normals   := geometry.normals;
-#if SIMD
-{
-		amount_4x := toM128(amount);
-		iterations := (normals.count / LANES);
-		while count < iterations
-		{
-			defer count += 1;
-			
-			p := positions.data + (count*LANES);
-			n := normals.data   + (count*LANES);
-			
-			position_4x := toVector34x(p[0], p[1], p[2], p[3]);
-			normal\ _4x := toVector34x(n[0], n[1], n[2], n[3]);
-			
-			computed := position_4x + (normal_4x*amount_4x);
-			
-			p[0] = .{computed.x[0], computed.y[0], computed.z[0]};
-			p[1] = .{computed.x[1], computed.y[1], computed.z[1]};
-			p[2] = .{computed.x[2], computed.y[2], computed.z[2]};
-			p[3] = .{computed.x[3], computed.y[3], computed.z[3]};
-		}
-}		
-
-		for count*LANES..positions.count-1 
-		{
-			positions[it] += normals[it]*amount;
-		}
+		UPDATE_GEOMETRY();
 		
 		datapoints[it-1] = rdtsc() - start;
 		
 		FREE(.Temp);
 	}
 	
-	result := perform_statistics(datapoints);
+	result := perform_statistics(datapoints, false);
 	print("Process % iterations (POINT_COUNT=%, THREADS=%, SIMD=%, POINTS_IN_SINGLE_CHUNK=%, RUN_CHECK_GEOMETRY_WORK=%)\n", ITERATIONS, POINT_COUNT, 0, SIMD, false, RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
 	print("    time elapsed to complete work: \n",, allocation=allocation(.Temp));
 	print("        - min = %\n", result.min      ,, allocation=allocation(.Temp));
@@ -204,7 +176,7 @@ else
 	// TODO: Think more about how to time performance
 	// print_thread_group_stats(,, allocation=allocation(.Temp));
 	
-	result := perform_statistics(datapoints);
+	result := perform_statistics(datapoints, PRINT_ITERATION_TIMES);
 	print("Process % iterations (POINT_COUNT=%, THREADS=%, SIMD=%, POINTS_IN_SINGLE_CHUNK=%, RUN_CHECK_GEOMETRY_WORK=%)\n", ITERATIONS, POINT_COUNT, secondary_thread_count, SIMD, POINTS_IN_SINGLE_CHUNK, RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
 	print("    time elapsed to complete work: \n",, allocation=allocation(.Temp));
 	print("        - min = %\n", result.min      ,, allocation=allocation(.Temp));
@@ -276,13 +248,13 @@ GET_COMPLETE_WORK(#code
 	return result;
 }
 
-perform_statistics :: (datapoints: []u64) -> Statistics
+perform_statistics :: (datapoints: []u64, $print_iteration_time: bool) -> Statistics
 {
 	result: Statistics;
 	reset_stats(*result);
 	for datapoints
 	{
-#if PRINT_ITERATION_TIMES
+#if print_iteration_time
 {
 		print("ITERATION(%) = %\n", FormatInt.{value=it_index+1, minimum_digits=4}, it,, allocation=allocation(.Temp));
 }

@@ -82,6 +82,46 @@ operator += :: inline (lhs: *$T/WorkCompleted, rhs: T)
 
 
 /////////////////////////////
+// Macros
+/////////////////////////////
+
+UPDATE_GEOMETRY :: () #expand
+{
+	positions := `geometry.positions;
+	normals   := `geometry.normals;
+#if SIMD
+{
+	amount_4x := toM128(`amount);
+	iterations := (normals.count / LANES);
+	while `count < iterations
+	{
+		defer `count += 1;
+		
+		p := positions.data + (`count*LANES);
+		n := normals.data   + (`count*LANES);
+		
+		position_4x := toVector34x(p[0], p[1], p[2], p[3]);
+		normal\ _4x := toVector34x(n[0], n[1], n[2], n[3]);
+		
+		computed := position_4x + (normal_4x*amount_4x);
+		
+		p[0] = .{computed.x[0], computed.y[0], computed.z[0]};
+		p[1] = .{computed.x[1], computed.y[1], computed.z[1]};
+		p[2] = .{computed.x[2], computed.y[2], computed.z[2]};
+		p[3] = .{computed.x[3], computed.y[3], computed.z[3]};
+	}
+}		
+
+	for `count*LANES..positions.count-1 
+	{
+		positions[it] += normals[it]*`amount;
+	}
+}
+
+/////////////////////////////
+
+
+/////////////////////////////
 // Functions
 /////////////////////////////
 
@@ -187,35 +227,7 @@ process_available_work :: (available: *void)
 			count  := 0;
 			amount := geometry.amount;
 			
-			positions := geometry.positions;
-			normals   := geometry.normals;
-#if SIMD
-{
-			amount_4x := toM128(amount);
-			iterations := (normals.count / LANES);
-			while count < iterations 
-			{
-				defer count += 1;
-				
-				p := positions.data + (count*LANES);
-				n := normals.data   + (count*LANES);
-				
-				position_4x := toVector34x(p[0], p[1], p[2], p[3]);
-				normal\ _4x := toVector34x(n[0], n[1], n[2], n[3]);
-				
-				computed := position_4x + (normal_4x*amount_4x);
-				
-				p[0] = .{computed.x[0], computed.y[0], computed.z[0]};
-				p[1] = .{computed.x[1], computed.y[1], computed.z[1]};
-				p[2] = .{computed.x[2], computed.y[2], computed.z[2]};
-				p[3] = .{computed.x[3], computed.y[3], computed.z[3]};
-			}
-}		
-
-			for count*LANES..positions.count-1 
-			{
-				positions[it] += normals[it]*amount;
-			}
+			UPDATE_GEOMETRY();
 		}
 	}
 }
