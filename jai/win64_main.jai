@@ -215,10 +215,25 @@ main :: ()
 	// https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getlogicalprocessorinformation
 	page_size := KIBIBYTES(4);
 	
-	core_count := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+	// NOTE: Leave 1 to the os
+	core_count := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) - 1;
+	if core_count > MAX_THREAD_COUNT
+	{
+		core_count = cast(u32)MAX_THREAD_COUNT;
+	}
+
+	// NOTE: excluding the processor running the main thread
+	thread_count := core_count - 1;
 	
-	single_threaded_stats := single_threaded_test(page_size);
-	multi\_threaded_stats := multi\_threaded_test(core_count, page_size);
+	seed := cast(u64)(current_time_monotonic().high);
+	
+	entropy: Random_State;
+	random_seed(*entropy, seed);
+	
+	print_test_configurations(thread_count);
+	
+	single_threaded_stats := single_threaded_test(*entropy,               page_size);
+	multi\_threaded_stats := multi\_threaded_test(*entropy, thread_count, page_size);
 	
 	print("Average gain: %\n", (single_threaded_stats.avg - multi\_threaded_stats.avg) /  multi\_threaded_stats.avg,, allocation=allocation(.Temp));
 	
@@ -234,10 +249,15 @@ main :: ()
 
 #import "Atomics"()(LLVM=LLVM);
 #import "Allocator";
-#import "Basic"()(ENABLE_ASSERT=INTERNAL);
+#import "Basic"()(ENABLE_ASSERT=ASSERT);
 #import "Common";
 #import "Machine_X64";
 #import "Random";
+#if SIMD
+{
+#if AVX { #import "Simd/AVX"; }
+else    { #import "Simd/SSE"; }
+}
 #import "Threading"()(
 	WorkAvailable       =WorkAvailable,
 	WorkCompleted       =WorkCompleted,

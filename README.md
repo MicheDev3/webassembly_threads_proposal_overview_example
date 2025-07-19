@@ -5,6 +5,7 @@ Build Parameters:
 
 	- optimise: whether build with optimisation on. Default = true
 	- internal: whether to build internal code paths. Default = false;
+	- assert: whether to enable runtime assert. Default = false;
 	- max-thread-count: maximum number of threads. Default = 32
 	- platform: whether platform to build. Required = (wasm|win64|linux)
 	- backend: whether backend to use. Ignored for wasm. Default = x64

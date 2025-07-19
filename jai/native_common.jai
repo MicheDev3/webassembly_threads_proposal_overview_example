@@ -4,7 +4,6 @@
 /////////////////////////////
 
 #load "common.jai";
-#load "simd.jai";
 
 /////////////////////////////
 
@@ -16,16 +15,23 @@
 ITERATIONS :: 1000;
 LOGGING    :: false;
 
-// POINT_COUNT :: 10_000_004;
-POINT_COUNT :: 1_000_004;
+POINT_COUNT :: 10_000_004;
+POINTS_PER_THREAD :: 100000;
 
-POINTS_IN_SINGLE_CHUNK :: false;
+SPLIT_POINTS_BY_THREAD :: true;
+// NOTE: if POINTS_IN_SINGLE_CHUNK, we can use easily 10M points. I think because this
+// will maximize cache utilization? 
+POINTS_IN_SINGLE_CHUNK :: true;
 
-LANES :: 4;
-SIMD  :: true;
+SIMD :: true;
+// TODO: AVX runs terribly in single_threaded_test, while it is fine in multi_threaded_test.
+// Try to understand exactly why and how to solve it.
+// I found this thread with useful info:
+// https://community.intel.com/t5/Intel-ISA-Extensions/Need-help-Why-my-avx-code-is-slower-than-SSE-code/m-p/1034874 
+AVX  :: false;
 
 // NOTE: By default RUN_CHECK_GEOMETRY_WORK is disable as it will decrease performance
-// quite a lot. I think because it is polluting the cache
+// quite a lot. I think because it is polluting the cache?
 RUN_CHECK_GEOMETRY_WORK :: false;
 PRINT_ITERATION_TIMES   :: false;
 
@@ -51,7 +57,7 @@ PlatformFiniThreads :: #type (threads: Block(PlatformThread));
 // Functions
 /////////////////////////////
 
-single_threaded_test :: (page_size: s64) -> Statistics
+single_threaded_test :: (entropy: *Random_State, page_size: s64) -> Statistics
 {
 	main_memory_size   := align_forward(MAIN_MEMORY_SIZE  , page_size);
 	temp_memory_size   := align_forward(TEMP_MEMORY_SIZE  , page_size);
@@ -61,28 +67,30 @@ single_threaded_test :: (page_size: s64) -> Statistics
 	init_arena(*allocator, main_memory_size, temp_memory_size);
 	context.allocator.data = *allocator;
 
-	geometry: Geometry;
-	init_geometry(*geometry, POINT_COUNT);
-	reset_geometry(*geometry);
-	
 	datapoints: [ITERATIONS]u64;
+	geometry := make_geometry(POINT_COUNT, CACHE_LINE_SIZE);
 	for 1..ITERATIONS
 	{
+#if RUN_CHECK_GEOMETRY_WORK
+{
+		reset_geometry(*geometry);
+}
+		amount := floor(random_get_within_range(entropy, 1.0, 100.0));
+
 		start := rdtsc();
-
-		count  := 0;
-		amount := 1.0;
-
 		UPDATE_GEOMETRY();
-		
 		datapoints[it-1] = rdtsc() - start;
+		
+#if RUN_CHECK_GEOMETRY_WORK
+{
+		check_geometry_work(geometry, amount);
+}
 		
 		FREE(.Temp);
 	}
 	
 	result := perform_statistics(datapoints, false);
-	print("Process % iterations (POINT_COUNT=%, THREADS=%, SIMD=%, LANES=%, POINTS_IN_SINGLE_CHUNK=%, RUN_CHECK_GEOMETRY_WORK=%)\n", ITERATIONS, POINT_COUNT, 0, SIMD, LANES, false, RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
-	print("    time elapsed to complete work: \n",, allocation=allocation(.Temp));
+	print("Single threaded time elapsed to complete work: \n",, allocation=allocation(.Temp));
 	print("        - min = %\n", result.min      ,, allocation=allocation(.Temp));
 	print("        - avg = %\n", result.avg      ,, allocation=allocation(.Temp));
 	print("        - max = %\n", result.max      ,, allocation=allocation(.Temp));
@@ -92,16 +100,8 @@ single_threaded_test :: (page_size: s64) -> Statistics
 	return result;
 }
 
-multi_threaded_test :: (all_thread_count: u32, page_size: s64) -> Statistics
+multi_threaded_test :: (entropy: *Random_State, worker_count: u32, page_size: s64) -> Statistics
 {	
-	if all_thread_count > MAX_THREAD_COUNT
-	{
-		all_thread_count = cast(u32)MAX_THREAD_COUNT;
-	}
-
-	// NOTE: excluding the processor running the main thread
-	secondary_thread_count := all_thread_count - 1;
-	
 	main_memory_size   := align_forward(MAIN_MEMORY_SIZE  , page_size);
 	temp_memory_size   := align_forward(TEMP_MEMORY_SIZE  , page_size);
 	thread_memory_size := align_forward(THREAD_MEMORY_SIZE, page_size);
@@ -110,10 +110,9 @@ multi_threaded_test :: (all_thread_count: u32, page_size: s64) -> Statistics
 	init_arena(*allocator, main_memory_size, temp_memory_size);
 	context.allocator.data = *allocator;
 	
-	seed := current_time_monotonic();
-	init_thread_group(enable_logging=true, cast(u64)seed.high);
+	init_thread_group(enable_logging=true, cast(u64)(current_time_monotonic().high));
 
-	success, threads := platform_init_threads(secondary_thread_count, thread_memory_size, temp_memory_size);
+	success, threads := platform_init_threads(worker_count, thread_memory_size, temp_memory_size);
 	defer
 	{
 		shutdown();
@@ -126,43 +125,57 @@ multi_threaded_test :: (all_thread_count: u32, page_size: s64) -> Statistics
 		print("Failed to create threads\n",, allocation=allocation(.Temp));
 		return .{};
 	}
-	
-	// work_count: s64 = secondary_thread_count;
-	
-	// rest: s64;
-	// points := POINT_COUNT / work_count;
-	// if work_count*points < POINT_COUNT
-	// {
-	// 	rest = POINT_COUNT - work_count*points; 
-	// }
+
+#if SPLIT_POINTS_BY_THREAD
+{	
+	work_count: s64 = worker_count;
 	
 	rest: s64;
-	points := 10000;
+	points := POINT_COUNT / work_count;
+	if work_count*points < POINT_COUNT
+	{
+		rest = POINT_COUNT - work_count*points; 
+	}
+}
+else
+{	
+	rest: s64;
+	points := POINTS_PER_THREAD;
 	work_count := POINT_COUNT / points;
 	if work_count*points < POINT_COUNT
 	{
 		rest = POINT_COUNT - work_count*points; 
 	}
+}
 	
 #if !POINTS_IN_SINGLE_CHUNK
 {
 
-	geometries: Block(Geometry);
-	init_geometry(*geometries, work_count, points, rest, CACHE_LINE_SIZE);
+	geometries := make_geometries(work_count, points, rest, CACHE_LINE_SIZE);
 }
 else
 {
-	geometry: Geometry;
-	init_geometry(*geometry, POINT_COUNT);
+	geometry := make_geometry(POINT_COUNT);
 }
-
-	entropy: Random_State;
-	random_seed(*entropy, cast(u64)seed.high);
 	
 	datapoints: [ITERATIONS]u64;
 	for 1..ITERATIONS
-	{	
-		amount := random_get_within_range(*entropy, 1.0, 100.0);
+	{
+
+#if RUN_CHECK_GEOMETRY_WORK
+{
+
+#if !POINTS_IN_SINGLE_CHUNK
+{
+		reset_geometries(geometries);
+}
+else
+{
+		reset_geometry(*geometry);
+}
+
+}
+		amount := floor(random_get_within_range(entropy, 1.0, 100.0));
 #if !POINTS_IN_SINGLE_CHUNK
 {
 		datapoints[it-1] = compute_work(geometries, amount);
@@ -178,8 +191,7 @@ else
 	// print_thread_group_stats(,, allocation=allocation(.Temp));
 	
 	result := perform_statistics(datapoints, PRINT_ITERATION_TIMES);
-	print("Process % iterations (POINT_COUNT=%, THREADS=%, SIMD=%, LANES=%, POINTS_IN_SINGLE_CHUNK=%, RUN_CHECK_GEOMETRY_WORK=%)\n", ITERATIONS, POINT_COUNT, secondary_thread_count, SIMD, LANES, POINTS_IN_SINGLE_CHUNK, RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
-	print("    time elapsed to complete work: \n",, allocation=allocation(.Temp));
+	print("Multi threaded time elapsed to complete work: \n",, allocation=allocation(.Temp));
 	print("        - min = %\n", result.min      ,, allocation=allocation(.Temp));
 	print("        - avg = %\n", result.avg      ,, allocation=allocation(.Temp));
 	print("        - max = %\n", result.max      ,, allocation=allocation(.Temp));
@@ -193,7 +205,7 @@ compute_work :: inline (geometries: Block(Geometry), amount: float) -> u64
 {
 	current, target: WorkCompleted;
 	push_geometry_work(geometries, *target, amount);
-
+	
 	result: u64;		
 	start := rdtsc();
 	while true
@@ -265,6 +277,20 @@ perform_statistics :: (datapoints: []u64, $print_iteration_time: bool) -> Statis
 	finalize_stats(*result, datapoints);
 	
 	return result;
+}
+
+print_test_configurations :: (thread_count: u32)
+{
+	print("Test configurations:\n");
+	print("    - simd:                    %\n", SIMD                    ,, allocation=allocation(.Temp));
+	print("    - avx:                     %\n", AVX                     ,, allocation=allocation(.Temp));
+	print("    - thread count:            %\n", thread_count            ,, allocation=allocation(.Temp));
+	print("    - iterations:              %\n", ITERATIONS              ,, allocation=allocation(.Temp));
+	print("    - point count:             %\n", POINT_COUNT             ,, allocation=allocation(.Temp));
+	print("    - points per thread:       %\n", POINTS_PER_THREAD       ,, allocation=allocation(.Temp));
+	print("    - points in single array:  %\n", POINTS_IN_SINGLE_CHUNK  ,, allocation=allocation(.Temp));
+	print("    - run check geometry work: %\n", RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
+	print("\n"                                                          ,, allocation=allocation(.Temp));
 }
 
 /////////////////////////////
