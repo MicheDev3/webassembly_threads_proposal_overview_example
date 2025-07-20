@@ -34,6 +34,9 @@ WorkCompleted :: struct
 	geometry_\count: s64;
 }
 
+#if SOA
+{
+
 Vector :: struct
 {
 	x: Block(f32);
@@ -47,6 +50,18 @@ Geometry :: struct
 	n: Vector;
 	
 	count: s64;
+}
+
+}
+else
+{
+
+Geometry :: struct
+{
+	p: Block(Vector3);
+	n: Block(Vector3);
+}
+
 }
 
 /////////////////////////////
@@ -94,11 +109,17 @@ operator += :: inline (lhs: *$T/WorkCompleted, rhs: T)
 // Macros
 /////////////////////////////
 
+#if SOA
+{
+
 UPDATE_GEOMETRY :: () #expand
 {
 
 #if SIMD
 {
+	// TODO: Fix AVX
+	#assert(AVX == false);
+	
 	a := make_lane(`amount);
 	
 	count: s64;
@@ -139,6 +160,66 @@ else
 
 }
 
+}
+else
+{
+
+UPDATE_GEOMETRY :: () #expand
+{
+
+#if SIMD
+{
+	// TODO: Implement AVX
+	#assert(AVX == false);
+	
+	a := make_lane(`amount);
+	
+	count: s64;
+	offset := (count*LANES);
+	iterations := (`geometry.p.count / LANES);
+	while count < iterations
+	{
+		defer count += 1;
+		
+		p := `geometry.p.data + (count*LANES);
+		n := `geometry.n.data + (count*LANES);
+		
+		px: Lane = .[p[0].x, p[1].x, p[2].x, p[3].x];
+		py: Lane = .[p[0].y, p[1].y, p[2].y, p[3].y];
+		pz: Lane = .[p[0].z, p[1].z, p[2].z, p[3].z];
+		
+		nx: Lane = .[n[0].x, n[1].x, n[2].x, n[3].x];
+		ny: Lane = .[n[0].y, n[1].y, n[2].y, n[3].y];
+		nz: Lane = .[n[0].z, n[1].z, n[2].z, n[3].z];
+
+		mulps(nx.data, a.data);
+		mulps(ny.data, a.data);
+		mulps(nz.data, a.data);
+
+		addps(px.data, nx.data);
+		addps(py.data, ny.data);
+		addps(pz.data, nz.data);
+		
+		p[0] = .{px[0], py[0], pz[0]};
+		p[1] = .{px[1], py[1], pz[1]};
+		p[2] = .{px[2], py[2], pz[2]};
+		p[3] = .{px[3], py[3], pz[3]};
+		
+		count += 1;
+		offset = (count*LANES);
+	}
+}
+else
+{
+	for *`geometry.p
+	{
+		it.* += `geometry.n[it_index]*`amount;
+	}
+}
+
+}
+
+}
 /////////////////////////////
 
 
@@ -149,25 +230,38 @@ else
 make_geometry :: inline (count: s64, alignment: s64 = 4) -> Geometry
 {
 	result: Geometry;
+#if SOA
+{
 	result.count = count;
-	reserve(*result.p.x, count,, allocation=allocation(.Main, alignment));
-	reserve(*result.p.y, count,, allocation=allocation(.Main, alignment));
-	reserve(*result.p.z, count,, allocation=allocation(.Main, alignment));
-	reserve(*result.n.x, count,, allocation=allocation(.Main, alignment));
-	reserve(*result.n.y, count,, allocation=allocation(.Main, alignment));
-	reserve(*result.n.z, count,, allocation=allocation(.Main, alignment));
+	reserve(*result.p.x, count,, allocation=allocation(alignment));
+	reserve(*result.p.y, count,, allocation=allocation(alignment));
+	reserve(*result.p.z, count,, allocation=allocation(alignment));
+	reserve(*result.n.x, count,, allocation=allocation(alignment));
+	reserve(*result.n.y, count,, allocation=allocation(alignment));
+	reserve(*result.n.z, count,, allocation=allocation(alignment));
 	
 	for 0..result.count-1
 	{
-		result.n.x[it] = 0.0;
-		result.n.y[it] = 0.0;
-		result.n.z[it] = 0.0;
+		result.n.x[it] = 1.0;
+		result.n.y[it] = 1.0;
+		result.n.z[it] = 1.0;
 	}
+}
+else
+{
+	reserve(*result.p, count);
+	reserve(*result.n, count);
+	
+	for *result.n { it.* = .{1, 1, 1}; }
+}
 	
 	return result;
 }
 
 reset_geometry :: inline (geometry: *Geometry)
+{
+
+#if SOA
 {
 	for 0..geometry.count-1
 	{
@@ -175,6 +269,12 @@ reset_geometry :: inline (geometry: *Geometry)
 		geometry.p.y[it] = 0.0;
 		geometry.p.z[it] = 0.0;
 	}
+}
+else
+{
+	for *geometry.p { it.* = .{0, 0, 0}; }
+}
+
 }
 
 make_geometries :: inline (chunks: s64, count: s64, rest: s64, alignment: s64 = 4) -> Block(Geometry)
@@ -214,14 +314,22 @@ push_geometry_work ::
 		
 		count :=  ifx rest != 0 && it == 0 then points + rest else points;
 		offset := ifx rest != 0 && it != 0 then (points*it) + rest else (points*it);
-		
+
+#if SOA
+{
 		work.geometry.chunk.p.x = .{count, geometry.p.x.data + offset};
 		work.geometry.chunk.p.y = .{count, geometry.p.y.data + offset};
 		work.geometry.chunk.p.z = .{count, geometry.p.z.data + offset};
 		work.geometry.chunk.n.x = .{count, geometry.n.x.data + offset};
 		work.geometry.chunk.n.y = .{count, geometry.n.y.data + offset};
 		work.geometry.chunk.n.z = .{count, geometry.n.z.data + offset};
-		
+		work.geometry.count = count;
+}
+else
+{
+		work.geometry.chunk.p = .{count, geometry.p.data + offset};
+		work.geometry.chunk.n = .{count, geometry.n.data + offset};
+}		
 		work.geometry.amount = amount;
 		
 		add_work(work);
@@ -247,6 +355,9 @@ push_geometry_work :: (geometries: Block(Geometry), completed: *WorkCompleted, a
 
 check_geometry_work :: (geometry: Geometry, amount: float)
 {
+
+#if SOA
+{
 	for 0..geometry.count-1
 	{
 		expected_px := geometry.p.x[it];
@@ -255,11 +366,21 @@ check_geometry_work :: (geometry: Geometry, amount: float)
 		computed_px := geometry.n.x[it]*amount;
 		computed_py := geometry.n.y[it]*amount;
 		computed_pz := geometry.n.z[it]*amount;
-		
+
 		assert(expected_px == computed_px);
 		assert(expected_py == computed_py);
 		assert(expected_pz == computed_pz);
 	}
+}
+else
+{
+	for expected: geometry.p
+	{
+		computed := geometry.n[it_index]*amount;
+		assert(expected == computed);
+	}
+}
+
 }
 
 check_geometry_work :: (geometries: Block(Geometry), amount: float)

@@ -28,6 +28,8 @@ WORK_COMPLETED  :: 2;
 POINT_COUNT       :: 1_000_004;
 POINTS_PER_THREAD :: 10000;
 
+SOA :: true;
+
 SIMD :: false;
 
 RUN_CHECK_GEOMETRY_WORK :: true;
@@ -40,7 +42,6 @@ RUN_CHECK_GEOMETRY_WORK :: true;
 /////////////////////////////
 
 INITTED: bool = false;
-MAIN_ARENA_ALLOCATOR: ArenaAllocator;
 
 CONTEXT: #Context;
 
@@ -55,6 +56,8 @@ SECONDARY_THREAD_COUNT: s64;
 ENTROPY: Random_State;
 
 AMOUNT: float;
+
+ARENAS: Array(MemoryArena, MAX_THREAD_COUNT);
 
 /////////////////////////////
 
@@ -72,11 +75,8 @@ AMOUNT: float;
 
 MemoryBlock :: struct
 {
-	main_base: *u8;
-	main_size: s64;
-	
-	temp_base: *u8;
-	temp_size: s64;
+	base: *u8;
+	size: s64;
 }
 
 /////////////////////////////
@@ -90,8 +90,7 @@ get_random_seed    :: () -> u64 #foreign "wasm_get_random_seed";
 carve_memory_block :: (
 	memory_block_index: s64,
 	memory_block_count: s64,
-	worker_memory_size: s64,
-	temp_memory_size: s64
+	worker_memory_size: s64
 ) -> MemoryBlock #foreign;
 
 /////////////////////////////
@@ -101,11 +100,12 @@ carve_memory_block :: (
 // Functions
 /////////////////////////////
 
-init_arena :: inline (arena: *ArenaAllocator, thread_count: s64, index: s64)
+make_arena :: inline (index: s64, thread_count: s64) -> MemoryArena
 {
-	block := carve_memory_block(index, thread_count, WORKER_NR_OF_PAGES, TEMP_NR_OF_PAGES);
-	arena.main = .{block.main_base, block.main_size, 0};
-	arena.temp = .{block.temp_base, block.temp_size, 0};
+	block := carve_memory_block(index, thread_count, WORKER_NR_OF_PAGES);
+	result: MemoryArena = .{block.base, block.size, 0, 0};
+	
+	return result;
 }
 
 /////////////////////////////
@@ -123,16 +123,16 @@ init :: (thread_count: s64) #c_call
     assert(INITTED == false);
     assert(thread_count > 0 && thread_count <= MAX_THREAD_COUNT);
 	
-	init_arena(*MAIN_ARENA_ALLOCATOR, thread_count, 0);
-	context.allocator.data = *MAIN_ARENA_ALLOCATOR;
+	arena := insert(*ARENAS);
+	arena.* = make_arena(0, thread_count);
+	context.allocator.data = arena;
 
 	init_thread_group(enable_logging=true);
 	for 1..thread_count-1
 	{
-		thread_arena_allocator := New(ArenaAllocator);
-		init_arena(thread_arena_allocator, thread_count, it);
-		
-		init_thread(it, thread_arena_allocator);
+		arena := insert(*ARENAS);
+		arena.* = make_arena(it, thread_count);
+		init_thread(it);
 	}
 	
 	GEOMETRY = make_geometry(POINT_COUNT, CACHE_LINE_SIZE);
@@ -142,12 +142,13 @@ init :: (thread_count: s64) #c_call
 	random_seed(*ENTROPY, seed);
 	
 	print("Test configurations:\n");
-	print("    - simd:                    %\n", SIMD                    ,, allocation=allocation(.Temp));
-	print("    - thread count:            %\n", thread_count            ,, allocation=allocation(.Temp));
-	print("    - point count:             %\n", POINT_COUNT             ,, allocation=allocation(.Temp));
-	print("    - points per thread:       %\n", POINTS_PER_THREAD       ,, allocation=allocation(.Temp));
-	print("    - run check geometry work: %\n", RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
-	print("\n"                                                          ,, allocation=allocation(.Temp));
+	print("    - soa:                     %\n", SOA                     ,, temp);
+	print("    - simd:                    %\n", SIMD                    ,, temp);
+	print("    - thread count:            %\n", thread_count            ,, temp);
+	print("    - point count:             %\n", POINT_COUNT             ,, temp);
+	print("    - points per thread:       %\n", POINTS_PER_THREAD       ,, temp);
+	print("    - run check geometry work: %\n", RUN_CHECK_GEOMETRY_WORK ,, temp);
+	print("\n"                                                          ,, temp);
 	
 	INITTED = true;
 }
@@ -162,6 +163,11 @@ run_worker :: (index: s64) #c_call
 	
 	// TODO: Will llvm in optimise complain about this?
 	while INITTED == false { sleep(100); }
+	
+	PUSH_ALLOCATOR(.{allocator_proc, *ARENAS[index]});
+	
+	context.temporary_storage = New(Temporary_Storage);
+	set_initial_data(context.temporary_storage, TEMP_MEMORY_SIZE, ALLOCATE(TEMP_MEMORY_SIZE));
 
 	run_thread(index);
 }
@@ -193,8 +199,8 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 			}
 			
 			CURRENT = .{};			
-			push_geometry_work(GEOMETRY, *TARGET, SECONDARY_THREAD_COUNT, points, rest, AMOUNT);
-			
+			push_geometry_work(GEOMETRY, *TARGET, work_count, points, rest, AMOUNT);
+	
 			result = WORK_DISPATCHED;		
 		}
 		case CHECK_IF_DONE;
@@ -205,8 +211,8 @@ GET_COMPLETE_WORK(#code
 {
 			CURRENT += completed;
 });
-			work_is_done := CURRENT >= TARGET;
-			if work_is_done {
+
+			if CURRENT >= TARGET {
 #if RUN_CHECK_GEOMETRY_WORK
 {
 				check_geometry_work(GEOMETRY, AMOUNT);
@@ -217,7 +223,7 @@ GET_COMPLETE_WORK(#code
 		case; { assert(false, "invalid control flow type"); }
 	}
 	
-	FREE(.Temp);
+	reset_temporary_storage();
 
 	return result;
 }

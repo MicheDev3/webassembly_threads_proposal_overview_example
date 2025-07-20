@@ -12,7 +12,7 @@
 
 #scope_file
 
-NULL_ARENA: MemoryArena = .{null, -1, -1};
+NULL_ARENA: MemoryArena = .{null, -1, -1, -1};
 
 #scope_export
 
@@ -23,12 +23,6 @@ NULL_ARENA: MemoryArena = .{null, -1, -1};
 // Enums
 /////////////////////////////
 
-ArenaType :: enum
-{
-	Main;
-	Temp;
-}
-
 /////////////////////////////
 
 
@@ -38,25 +32,20 @@ ArenaType :: enum
 
 #scope_file
 
-MemoryArena :: struct
-{
-	base: *u8;
-	size: s64;
-	used: s64;
-}
-
 Allocation :: struct
 {
-	arena: ArenaType;
 	alignment: s64;
 }
 
 #scope_export
 
-ArenaAllocator :: struct
+MemoryArena :: struct
 {
-	main: MemoryArena;
-	temp: MemoryArena;
+	base: *u8;
+	size: s64;
+	used: s64;
+	
+	watermark: s64;
 }
 
 /////////////////////////////
@@ -89,7 +78,7 @@ operator == :: inline (lhs: MemoryArena, rhs: MemoryArena) -> bool
 // Context
 /////////////////////////////
 
-#add_context allocation: Allocation = .{.Main, 4};
+#add_context allocation: Allocation = .{4};
 
 /////////////////////////////
 
@@ -128,21 +117,12 @@ allocator_proc ::
 	allocator_data: *void
 ) -> *void
 {
-	allocator: *ArenaAllocator = allocator_data;
-	assert(allocator.main != NULL_ARENA);
-	assert(allocator.temp != NULL_ARENA);
+	arena: *MemoryArena = allocator_data;
 	
 	if #complete mode ==
 	{
 		case .ALLOCATE;
 		{
-			arena: *MemoryArena;
-			if context.allocation.arena ==
-			{
-				case .Temp; { arena = *allocator.temp; }
-				case .Main; { arena = *allocator.main; }
-			}
-			
 			alignment := context.allocation.alignment;
 			// NOTE: Makinkg sure alignment is a power of two
 			assert((alignment & ~(alignment - 1)) == alignment);
@@ -159,21 +139,14 @@ allocator_proc ::
 		}
 		case .FREE;
 		{
-			arena: *MemoryArena;
-			if context.allocation.arena ==
-			{
-				case .Temp; { arena = *allocator.temp; }
-				case .Main; { arena = *allocator.main; }
-			}
-			
 			arena.used = 0;
 			
 			return null;
 		}
 		case .SHUTDOWN;
 		{
-			allocator.main = NULL_ARENA;
-			allocator.temp = NULL_ARENA;
+			// TODO: Should also release the memory
+			arena.* = NULL_ARENA;
 			
 			return null;
 		}
@@ -197,10 +170,9 @@ allocator_proc ::
 	}
 }
 
-allocation :: inline (arena: ArenaType, alignment: s64 = 4) -> Allocation
+allocation :: inline (alignment: s64 = 4) -> Allocation
 {
 	result: Allocation;
-	result.arena     = arena;
 	result.alignment = alignment;
 	
 	return result;

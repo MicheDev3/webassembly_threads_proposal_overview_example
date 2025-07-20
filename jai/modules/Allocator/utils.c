@@ -9,26 +9,21 @@ typedef __UINT8_TYPE__   u8;
 
 typedef struct
 {
-	u8* main_base;
-	s64 main_size;
-	
-	u8* temp_base;
-	s64 temp_size;
+	u8* base;
+	s64 size;
 } MemoryBlock;
 
 MemoryBlock carve_memory_block
 (
 	s64 memory_block_index,
 	s64 memory_block_count,
-	s64 worker_nr_of_pages,
-	s64 temp_nr_of_pages
+	s64 worker_nr_of_pages
 )
 {
 	ptr heap_base = (ptr)&__heap_base;
 	ptr heap_end  = (ptr)&__heap_end;
 	s64 total_memory_size  = heap_end - heap_base;
 	s64 worker_memory_size = worker_nr_of_pages*PAGE_SIZE;
-	s64 temp_memory_size   = temp_nr_of_pages  *PAGE_SIZE;
 	
 	s64 main_memory_size = total_memory_size - (worker_memory_size*memory_block_count);
 	
@@ -41,10 +36,8 @@ MemoryBlock carve_memory_block
 	}
 	
 	MemoryBlock result;
-	result.main_base = (u8*)(heap_base + offset);
-	result.main_size = total_size - temp_memory_size;
-	result.temp_base = result.main_base + result.main_size;
-	result.temp_size = temp_memory_size;
+	result.base = (u8*)(heap_base + offset);
+	result.size = total_size;
 	
 	return result;
 }

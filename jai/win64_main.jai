@@ -105,7 +105,7 @@ struct
 	index:  u32;
 	handle: *void;
 	
-	allocator: ArenaAllocator;
+	arena: MemoryArena;
 });
 
 /////////////////////////////
@@ -140,16 +140,14 @@ _endthreadex :: (return_code: u32) #foreign crt;
 // Functions
 /////////////////////////////
 
-init_arena :: inline (arena: *ArenaAllocator, total_size: s64, temp_size: s64)
+make_arena :: inline (size: s64) -> MemoryArena
 {
-	assert(total_size > temp_size);
-	
-	memory := VirtualAlloc(null, cast(u64)total_size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+	memory := VirtualAlloc(null, cast(u64)size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 	assert(memory != null);
 	
-	main_size := total_size - temp_size;
-	arena.main = .{memory,             main_size, 0};
-	arena.temp = .{memory + main_size, temp_size, 0};
+	result: MemoryArena = .{memory, size, 0, 0};
+	
+	return result;
 }
 
 win64_thread_proc :: (params: *void) -> u32 #c_call
@@ -159,18 +157,19 @@ win64_thread_proc :: (params: *void) -> u32 #c_call
 	
 	thread: *PlatformThread = params;
 	context.thread_index = thread.index;
+	
+	PUSH_ALLOCATOR(.{allocator_proc, *thread.arena});
+	
+	context.temporary_storage = New(Temporary_Storage);
+	set_initial_data(context.temporary_storage, TEMP_MEMORY_SIZE, ALLOCATE(TEMP_MEMORY_SIZE));
+	
 	run_thread(thread.index);
 	
 	_endthreadex(0);
 	return 0;
 }
 
-platform_init_threads :PlatformInitThreads: 
-(
-	thread_count: u32,
-	main_memory_size: s64,
-	temp_memory_size: s64
-) -> bool, Block(PlatformThread)
+platform_init_threads :PlatformInitThreads: (thread_count: u32) -> bool, Block(PlatformThread)
 {
 	success: bool = true;
 	result: Block(PlatformThread);
@@ -179,8 +178,8 @@ platform_init_threads :PlatformInitThreads:
 	{
 		thread := New(PlatformThread);
 		thread.index = it;
-		init_arena(*thread.allocator, main_memory_size, temp_memory_size);
-		init_thread(thread.index, *thread.allocator);
+		thread.arena = make_arena(THREAD_MEMORY_SIZE + TEMP_MEMORY_SIZE);
+		init_thread(thread.index);
 		
 		ignored: s32;
 		handle := _beginthreadex(null, 0, cast(*void)win64_thread_proc, thread, REALTIME_PRIORITY_CLASS, *ignored);
@@ -211,16 +210,10 @@ platform_fini_threads :PlatformFiniThreads: (threads: Block(PlatformThread))
 
 main :: ()
 {
-	// TODO: Retrieve how big is a memory page
 	// https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getlogicalprocessorinformation
-	page_size := KIBIBYTES(4);
-	main_memory_size   := align_forward(MAIN_MEMORY_SIZE  , page_size);
-	temp_memory_size   := align_forward(TEMP_MEMORY_SIZE  , page_size);
-	thread_memory_size := align_forward(THREAD_MEMORY_SIZE, page_size);
 	
-	allocator: ArenaAllocator;
-	init_arena(*allocator, main_memory_size, temp_memory_size);
-	context.allocator.data = *allocator;
+	arena := make_arena(MAIN_MEMORY_SIZE);
+	context.allocator.data = *arena;
 	
 	// NOTE: Leave 1 to the os
 	core_count := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) - 1;
@@ -236,10 +229,7 @@ main :: ()
 	time_to_string :: (using ct: Calendar_Time) -> string
 	{
 		date_part :: #bake_arguments formatInt(minimum_digits = 2);
-		
-		timezone_name := ifx ct.time_zone == .UTC then "Z" else ""; // @Incomplete: Maybe determine local time zone name or offset
-		
-		time_string := tprint("%_%_%T%_%_%", year, date_part(month_starting_at_0 + 1), date_part(day_of_month_starting_at_0 + 1), date_part(hour), date_part(minute), date_part(second),, allocation=allocation(.Temp));
+		time_string := sprint("%_%_%T%_%_%", year, date_part(month_starting_at_0 + 1), date_part(day_of_month_starting_at_0 + 1), date_part(hour), date_part(minute), date_part(second));
 
 		return time_string;
 	}
@@ -252,28 +242,29 @@ main :: ()
 	print_test_configurations(today, thread_count);
 	
 	single_threaded_stats := single_threaded_test(*entropy);
-	multi\_threaded_stats := multi\_threaded_test(*entropy, thread_count, thread_memory_size, temp_memory_size);
+	multi\_threaded_stats := multi\_threaded_test(*entropy, thread_count);
 	assert(single_threaded_stats.datapoints.stored == multi\_threaded_stats.datapoints.stored);
 	
-	print("Average gain: %\n", (single_threaded_stats.avg - multi\_threaded_stats.avg) /  multi\_threaded_stats.avg,, allocation=allocation(.Temp));
+	print("Average gain: %\n", (single_threaded_stats.avg - multi\_threaded_stats.avg) /  multi\_threaded_stats.avg,, temp);
 
 #if PRINT_CSV_DATAPOINTS
 {
-	print("Writting csv datapoints...\n",, allocation=allocation(.Temp));
+	print("Writting csv datapoints...\n",, temp);
 
 	csv: String_Builder;
-	filename := tprint("%_stats_%.csv", POINT_COUNT, today,, allocation=allocation(.Temp));
+	csv.allocator = temp;
 	
-	print_to_builder(*csv, "single, multi\n",, allocation=allocation(.Temp));
+	print_to_builder(*csv, "single, multi\n",, temp);
 	for 0..single_threaded_stats.datapoints.stored-1
 	{
 		single_datapoint := single_threaded_stats.datapoints[it];
 		multi\_datapoint := multi\_threaded_stats.datapoints[it];
 		
-		print_to_builder(*csv, "%, %\n", single_datapoint, multi\_datapoint,, allocation=allocation(.Temp));
+		print_to_builder(*csv, "%, %\n", single_datapoint, multi\_datapoint,, temp);
 	}
 	
-	content := builder_to_string(*csv, do_reset=false,, allocation=allocation(.Temp));
+	content := builder_to_string(*csv, do_reset=false,, temp);
+	filename := tprint("%_stats_%.csv", POINT_COUNT, today);
 
 	write_entire_file(filename, content);
 }
@@ -309,8 +300,7 @@ else    { #import "Simd/SSE"; }
 	INTERNAL            =INTERNAL,
 	LOGGING             =LOGGING,
 	ProcessAvailableWork=process_available_work,
-	ProcessCompletedWork=process_completed_work,
-	GetCurrentTimestamp = () -> u64 { return rdtsc(); }
+	ProcessCompletedWork=process_completed_work
 );
 
 /////////////////////////////

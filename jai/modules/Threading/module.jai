@@ -13,8 +13,7 @@
 	ProcessCompletedWork := (available: *void, completed: *void)
 	{
 		assert(false, "ProcessCompletedWork function must be defined!");
-	},
-	GetCurrentTimestamp := () -> u64 { return 0; }
+	}
 );
 
 #assert WorkAvailable != void "WorkAvailable struct must be defined!";
@@ -45,8 +44,6 @@ struct
 {		
 	index: s64;
 	
-	allocator: Allocator;
-
 	semaphore: Semaphore;
 	
 	// TODO: Add debug info to known whether the same thread tries to lock
@@ -128,20 +125,19 @@ init_thread_group :: inline (enable_logging: bool)
 {
 	if enable_logging { toggle_logging(); }
 }
+
 	THREAD_GROUP.initted = true;
 }
 
-init_thread :: inline (index: s64, arena: *ArenaAllocator)
+init_thread :: inline (index: s64)
 {
 	assert(THREAD_GROUP.initted);
 
 	thread := insert(*THREAD_GROUP.threads);
 	thread.index = index;
-	thread.allocator = .{allocator_proc, arena};
 	start(*thread.semaphore);
 	start(*thread.available_mutex);
 	start(*thread.completed_mutex);
-	reserve(*thread.available, THREAD_QUEUE_SIZE,, thread.allocator);
 }
 
 // TODO: Implement work stealing
@@ -175,8 +171,8 @@ run_thread :: (index: s64)
 	assert(THREAD_GROUP.initted);
 
 	thread := *THREAD_GROUP.threads[index];
+	reserve(*thread.available, THREAD_QUEUE_SIZE);
 	thread.running = true;
-	PUSH_ALLOCATOR(thread.allocator);
 	write_message("Thread(%): starting\n", index);
 
 	defer
@@ -213,7 +209,7 @@ PUSH_LOCK(*thread.available_mutex, #code
 });
 
 		inline ProcessAvailableWork(*work);
-
+		
 		write_message("Thread(%): work '%' executed\n", index, work);
 
 PUSH_LOCK(*thread.completed_mutex, #code
@@ -221,7 +217,7 @@ PUSH_LOCK(*thread.completed_mutex, #code
 		inline ProcessCompletedWork(*work, *thread.completed);
 });
 
-		FREE(.Temp);
+		reset_temporary_storage();
 	}
 }
 
@@ -266,8 +262,10 @@ write_message :: inline (format: string, args: ..Any)
 	if THREAD_GROUP.logging
 	{
 		builder: String_Builder;
-		print_to_builder(*builder, format, ..args              ,, allocation=allocation(.Temp));
-		write_string(builder_to_string(*builder, do_reset=false,, allocation=allocation(.Temp)));
+		builder.allocator = temp;
+		print_to_builder(*builder, format, ..args            ,, temp);
+		message := builder_to_string(*builder, do_reset=false,, temp);
+		write_string(message);
 	}
 } @PrintLike
 

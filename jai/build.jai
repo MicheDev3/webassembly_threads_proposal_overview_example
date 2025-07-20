@@ -487,10 +487,6 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platform_o
 		compiler_report(tprint("'worker_nr_of_pages(%)' must be greater than 'temp_memory_size(%)'", platform_options.worker_nr_pages, platform_options.temp_nr_pages));
 	}
 	
-/*
-	(global $__stack_pointer (;0;) (import "env" "__stack_pointer") (mut i64))
-*/
-	
 	// clang -Oz --target=wasm64 -nostdlib -c -o utils.o utils.c
 	allocator_object_file_path := "modules/Allocator/utils.o";
 	build_child_options.additional_linker_arguments = .[
@@ -520,7 +516,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platform_o
 	
 	add_build_file("wasm_main.jai", w);
 	add_build_string(tprint("WORKER_NR_OF_PAGES :: %;", platform_options.worker_nr_pages), w);
-	add_build_string(tprint("TEMP_NR_OF_PAGES :: %;", platform_options.temp_nr_pages), w);
+	add_build_string(tprint("TEMP_MEMORY_SIZE :: %;", WASM_MEMORY_PAGE_SIZE*platform_options.temp_nr_pages), w);
 	add_build_string(tprint("CACHE_LINE_SIZE :: %;", options.cache_line_size), w);
 	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
 	add_build_string(tprint("INTERNAL :: %;", options.internal), w);

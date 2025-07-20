@@ -15,17 +15,16 @@
 ITERATIONS :: 1000;
 LOGGING    :: false;
 
-POINT_COUNT :: 10_000_004;
-POINTS_PER_THREAD :: 100000;
+POINT_COUNT :: 1_000_004;
+POINTS_PER_THREAD :: 10_000;
 
-SPLIT_POINTS_BY_THREAD :: true;
-// NOTE: if POINTS_IN_SINGLE_CHUNK, we can use easily 10M points. I think because this
-// will maximize cache utilization? 
-POINTS_IN_SINGLE_CHUNK :: true;
+SPLIT_POINTS_BY_THREAD :: false;
+POINTS_IN_SINGLE_CHUNK :: false;
+
+SOA :: true;
 
 SIMD :: true;
-// TODO: AVX runs terribly in single_threaded_test, while it is fine in multi_threaded_test.
-// Try to understand exactly why and how to solve it.
+// TODO: AVX runs terribly. Try to understand exactly why and how to solve it.
 // I found this thread with useful info:
 // https://community.intel.com/t5/Intel-ISA-Extensions/Need-help-Why-my-avx-code-is-slower-than-SSE-code/m-p/1034874 
 AVX  :: false;
@@ -49,12 +48,7 @@ PRINT_CSV_DATAPOINTS    :: false;
 // Types
 /////////////////////////////
 
-PlatformInitThreads :: #type 
-(
-	thread_count: u32,
-	main_memory_size: s64,
-	temp_memory_size: s64
-) -> bool, Block(PlatformThread);
+PlatformInitThreads :: #type (thread_count: u32) -> bool, Block(PlatformThread);
 PlatformFiniThreads :: #type (threads: Block(PlatformThread));
 
 /////////////////////////////
@@ -90,28 +84,28 @@ single_threaded_test :: (entropy: *Random_State) -> Statistics
 		check_geometry_work(geometry, amount);
 }
 		
-		FREE(.Temp);
+		reset_temporary_storage();
 	}
 	
 	perform_statistics(*result);
-	print("Single threaded time elapsed to complete work: \n",, allocation=allocation(.Temp));
-	print("        - min = %\n", result.min      ,, allocation=allocation(.Temp));
-	print("        - avg = %\n", result.avg      ,, allocation=allocation(.Temp));
-	print("        - max = %\n", result.max      ,, allocation=allocation(.Temp));
-	print("        - std = %\n", result.std_dev  ,, allocation=allocation(.Temp));
-	print("\n",, allocation=allocation(.Temp));
+	print("Single threaded time elapsed to complete work: \n",, temp);
+	print("        - min = %\n", result.min      ,, temp);
+	print("        - avg = %\n", result.avg      ,, temp);
+	print("        - max = %\n", result.max      ,, temp);
+	print("        - std = %\n", result.std_dev  ,, temp);
+	print("\n",, temp);
 	
 	return result;
 }
 
-multi_threaded_test :: (entropy: *Random_State, worker_count: u32, thread_memory_size: s64, temp_memory_size: s64) -> Statistics
+multi_threaded_test :: (entropy: *Random_State, worker_count: u32) -> Statistics
 {
 	result: Statistics;
 	reset_stats(*result);
 	reserve(*result.datapoints, ITERATIONS);
 	
 	init_thread_group(enable_logging=true);
-	success, threads := platform_init_threads(worker_count, thread_memory_size, temp_memory_size);
+	success, threads := platform_init_threads(worker_count);
 	defer
 	{
 		shutdown();
@@ -121,7 +115,7 @@ multi_threaded_test :: (entropy: *Random_State, worker_count: u32, thread_memory
 	
 	if !success
 	{
-		print("Failed to create threads\n",, allocation=allocation(.Temp));
+		print("Failed to create threads\n",, temp);
 		return .{};
 	}
 
@@ -185,16 +179,16 @@ else
 		datapoint.* = compute_work(*geometry, work_count, points, rest, amount);
 }
 		
-		FREE(.Temp);
+		reset_temporary_storage();
 	}
 	
 	perform_statistics(*result);
-	print("Multi threaded time elapsed to complete work: \n",, allocation=allocation(.Temp));
-	print("        - min = %\n", result.min      ,, allocation=allocation(.Temp));
-	print("        - avg = %\n", result.avg      ,, allocation=allocation(.Temp));
-	print("        - max = %\n", result.max      ,, allocation=allocation(.Temp));
-	print("        - std = %\n", result.std_dev  ,, allocation=allocation(.Temp));
-	print("\n",, allocation=allocation(.Temp));
+	print("Multi threaded time elapsed to complete work: \n",, temp);
+	print("        - min = %\n", result.min      ,, temp);
+	print("        - avg = %\n", result.avg      ,, temp);
+	print("        - max = %\n", result.max      ,, temp);
+	print("        - std = %\n", result.std_dev  ,, temp);
+	print("\n",, temp);
 	
 	return result;
 }
@@ -261,17 +255,18 @@ GET_COMPLETE_WORK(#code
 
 print_test_configurations :: (now: string, thread_count: u32)
 {
-	print("Test configurations(%):\n", now                              ,, allocation=allocation(.Temp));
-	print("    - simd:                    %\n", SIMD                    ,, allocation=allocation(.Temp));
-	print("    - avx:                     %\n", AVX                     ,, allocation=allocation(.Temp));
-	print("    - thread count:            %\n", thread_count            ,, allocation=allocation(.Temp));
-	print("    - iterations:              %\n", ITERATIONS              ,, allocation=allocation(.Temp));
-	print("    - point count:             %\n", POINT_COUNT             ,, allocation=allocation(.Temp));
-	print("    - points per thread:       %\n", POINTS_PER_THREAD       ,, allocation=allocation(.Temp));
-	print("    - points in single array:  %\n", POINTS_IN_SINGLE_CHUNK  ,, allocation=allocation(.Temp));
-	print("    - run check geometry work: %\n", RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
-	print("    - print csv datapoints:    %\n", PRINT_CSV_DATAPOINTS    ,, allocation=allocation(.Temp));
-	print("\n"                                                          ,, allocation=allocation(.Temp));
+	print("Test configurations(%):\n", now                              ,, temp);
+	print("    - soa:                     %\n", SOA                     ,, temp);
+	print("    - simd:                    %\n", SIMD                    ,, temp);
+	print("    - avx:                     %\n", AVX                     ,, temp);
+	print("    - thread count:            %\n", thread_count            ,, temp);
+	print("    - iterations:              %\n", ITERATIONS              ,, temp);
+	print("    - point count:             %\n", POINT_COUNT             ,, temp);
+	print("    - points per thread:       %\n", POINTS_PER_THREAD       ,, temp);
+	print("    - points in single array:  %\n", POINTS_IN_SINGLE_CHUNK  ,, temp);
+	print("    - run check geometry work: %\n", RUN_CHECK_GEOMETRY_WORK ,, temp);
+	print("    - print csv datapoints:    %\n", PRINT_CSV_DATAPOINTS    ,, temp);
+	print("\n"                                                          ,, temp);
 }
 
 /////////////////////////////

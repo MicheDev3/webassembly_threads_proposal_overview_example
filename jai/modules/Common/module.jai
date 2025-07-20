@@ -197,7 +197,7 @@ ALLOCATE :: (size: s64) -> *void #expand
 	return result;
 }
 
-FREE :: (arena: ArenaType) #expand
+FREE :: () #expand
 {
 	PUSH_ALLOCATOR_PARAMS(allocation(arena));
 	
