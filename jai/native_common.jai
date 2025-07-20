@@ -110,8 +110,7 @@ multi_threaded_test :: (entropy: *Random_State, worker_count: u32, page_size: s6
 	init_arena(*allocator, main_memory_size, temp_memory_size);
 	context.allocator.data = *allocator;
 	
-	init_thread_group(enable_logging=true, cast(u64)(current_time_monotonic().high));
-
+	init_thread_group(enable_logging=true);
 	success, threads := platform_init_threads(worker_count, thread_memory_size, temp_memory_size);
 	defer
 	{

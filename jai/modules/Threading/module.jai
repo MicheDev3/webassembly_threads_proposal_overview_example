@@ -77,8 +77,6 @@ ThreadGroup :: struct
 {
 	threads: Array(Thread, MAX_THREAD_COUNT-1);
 	
-	entropy: Random_State;
-	
 	cursor: s64;
 
 	shutdown: bool;
@@ -128,9 +126,8 @@ PUSH_LOCK(*thread.completed_mutex, #code
 // Functions
 /////////////////////////////
 
-init_thread_group :: inline (enable_logging: bool, seed: u64)
+init_thread_group :: inline (enable_logging: bool)
 {
-	random_seed(*THREAD_GROUP.entropy, seed);
 #if LOGGING
 {
 	if enable_logging { toggle_logging(); }
@@ -157,13 +154,12 @@ init_thread :: inline (index: s64, arena: *ArenaAllocator)
 
 }
 
-add_work :: inline (work: WorkAvailable, $sequentially: bool)
+// TODO: Implement work stealing
+add_work :: inline (work: WorkAvailable)
 {
 	assert(THREAD_GROUP.initted);
 	assert(!THREAD_GROUP.shutdown);
 
-#if sequentially
-{
 	thread := *THREAD_GROUP.threads[THREAD_GROUP.cursor];
 	THREAD_GROUP.cursor += 1;
 	
@@ -171,28 +167,6 @@ add_work :: inline (work: WorkAvailable, $sequentially: bool)
 	{
 		THREAD_GROUP.cursor = 0;
 	}
-}
-else
-{
-	// NOTE: based on "The Power of Two Random Choices": https://people.cs.umass.edu/~ramesh/Site/PUBLICATIONS_files/MRS01.pdf
-	random1 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)THREAD_GROUP.threads.stored);
-	random2 := cast(u32)random_get_within_range(*THREAD_GROUP.entropy, 0, cast(float)THREAD_GROUP.threads.stored);
-	
-	// NOTE: random_get_within_range is inclusive for both ends but the max, as far I can tell,
-	// seems has less chance to be choosen (maybe due to floating precision?) so I am using stored
-	// and then clamp randomx here
-	if random1 >= THREAD_GROUP.threads.stored random1 -= 1;
-	if random2 >= THREAD_GROUP.threads.stored random2 -= 1;
-	
-	thread1 := *THREAD_GROUP.threads[random1];
-	thread2 := *THREAD_GROUP.threads[random2];
-	
-	thread := (
-		ifx thread1.available.stored > thread2.available.stored
-		then thread2
-		else thread1
-	);
-}
 	
 PUSH_LOCK(*thread.available_mutex, #code
 {

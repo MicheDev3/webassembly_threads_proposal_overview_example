@@ -224,7 +224,7 @@ push_geometry_work ::
 		
 		work.geometry.amount = amount;
 		
-		add_work(work, sequentially=true);
+		add_work(work);
 	}
 	
 	completed.geometry_count = work_count;
@@ -239,7 +239,7 @@ push_geometry_work :: (geometries: Block(Geometry), completed: *WorkCompleted, a
 		work.geometry.chunk = it;
 		work.geometry.amount = amount;
 		
-		add_work(work, sequentially=true);
+		add_work(work);
 	}
 	
 	completed.geometry_count = geometries.count;

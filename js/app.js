@@ -10,7 +10,6 @@ let closeButton;
 document.addEventListener('DOMContentLoaded', onDocumentLoaded);
 
 function onDocumentLoaded(){
-    console.log("onDocumentLoaded");
     // const startButton = document.getElementById('start-button');
     dispatchButton = document.getElementById('dispatch-button');
     closeButton = document.getElementById('close-button');

@@ -428,6 +428,7 @@ build_linux :: (build_parent_options: Build_Options, options: Options, platform_
 	add_build_string(tprint("CACHE_LINE_SIZE :: %;", options.cache_line_size), w);
 	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
 	add_build_string(tprint("INTERNAL :: %;", options.internal), w);
+	add_build_string(tprint("ASSERT :: %;", options.assert), w);
 	add_build_string(tprint("LLVM :: %;", llvm), w);
 	
 	compiler_end_intercept(w);
@@ -523,6 +524,7 @@ build_wasm :: (build_parent_options: Build_Options, options: Options, platform_o
 	add_build_string(tprint("CACHE_LINE_SIZE :: %;", options.cache_line_size), w);
 	add_build_string(tprint("MAX_THREAD_COUNT :: %;", options.max_thread_count), w);
 	add_build_string(tprint("INTERNAL :: %;", options.internal), w);
+	add_build_string(tprint("ASSERT :: %;", options.assert), w);
 	
 	while true
 	{

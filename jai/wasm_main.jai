@@ -16,9 +16,6 @@
 
 LOGGING :: false;
 
-POINTS_COUNT      :: 1_000_004;
-POINTS_PER_THREAD :: 5;
-
 // WORKER_REQUEST_TYPE
 DISPATCH_WORK   :: 1;
 CHECK_IF_DONE   :: 2;
@@ -28,10 +25,12 @@ WORK_DISPATCHED :: 0;
 PROCESSING_WORK :: 1;
 WORK_COMPLETED  :: 2;
 
-POINT_COUNT     :: 1_000_004;
+POINT_COUNT       :: 1_000_004;
+POINTS_PER_THREAD :: 10000;
 
-LANES :: 0;
-SIMD  :: false;
+SIMD :: false;
+
+RUN_CHECK_GEOMETRY_WORK :: true;
 
 /////////////////////////////
 
@@ -45,7 +44,7 @@ MAIN_ARENA_ALLOCATOR: ArenaAllocator;
 
 CONTEXT: #Context;
 
-GEOMETRIES: Block(Geometry);
+GEOMETRY: Geometry;
 CURRENT, TARGET: WorkCompleted;
 
 DISPATCHED_TASKS_COUNT :s64;
@@ -127,8 +126,7 @@ init :: (thread_count: s64) #c_call
 	init_arena(*MAIN_ARENA_ALLOCATOR, thread_count, 0);
 	context.allocator.data = *MAIN_ARENA_ALLOCATOR;
 
-	seed := get_random_seed();
-	init_thread_group(enable_logging=true, seed);
+	init_thread_group(enable_logging=true);
 	for 1..thread_count-1
 	{
 		thread_arena_allocator := New(ArenaAllocator);
@@ -137,17 +135,19 @@ init :: (thread_count: s64) #c_call
 		init_thread(it, thread_arena_allocator);
 	}
 	
-	rest: s64;
-	points := POINT_COUNT / thread_count;
-	if thread_count*points < POINT_COUNT
-	{
-		rest = POINT_COUNT - thread_count*points; 
-	}
-	
-	init_geometry(*GEOMETRIES, thread_count, points, rest, CACHE_LINE_SIZE);
+	GEOMETRY = make_geometry(POINT_COUNT, CACHE_LINE_SIZE);
 	SECONDARY_THREAD_COUNT = thread_count-1;
 	
+	seed := get_random_seed();
 	random_seed(*ENTROPY, seed);
+	
+	print("Test configurations:\n");
+	print("    - simd:                    %\n", SIMD                    ,, allocation=allocation(.Temp));
+	print("    - thread count:            %\n", thread_count            ,, allocation=allocation(.Temp));
+	print("    - point count:             %\n", POINT_COUNT             ,, allocation=allocation(.Temp));
+	print("    - points per thread:       %\n", POINTS_PER_THREAD       ,, allocation=allocation(.Temp));
+	print("    - run check geometry work: %\n", RUN_CHECK_GEOMETRY_WORK ,, allocation=allocation(.Temp));
+	print("\n"                                                          ,, allocation=allocation(.Temp));
 	
 	INITTED = true;
 }
@@ -178,10 +178,22 @@ run_worker_control_flow :: (type: s64) -> s64 #c_call
 	{
 		case DISPATCH_WORK;
 		{
+#if RUN_CHECK_GEOMETRY_WORK
+{
+			reset_geometry(*GEOMETRY);
+}
 			AMOUNT = random_get_within_range(*ENTROPY, 1.0, 100.0);
 			
+			rest: s64;
+			points := POINTS_PER_THREAD;
+			work_count := POINT_COUNT / points;
+			if work_count*points < POINT_COUNT
+			{
+				rest = POINT_COUNT - work_count*points;
+			}
+			
 			CURRENT = .{};			
-			push_geometry_work(GEOMETRIES, *TARGET, AMOUNT);
+			push_geometry_work(GEOMETRY, *TARGET, SECONDARY_THREAD_COUNT, points, rest, AMOUNT);
 			
 			result = WORK_DISPATCHED;		
 		}
@@ -195,8 +207,10 @@ GET_COMPLETE_WORK(#code
 });
 			work_is_done := CURRENT >= TARGET;
 			if work_is_done {
-				check_geometry_work(GEOMETRIES, AMOUNT);
-				
+#if RUN_CHECK_GEOMETRY_WORK
+{
+				check_geometry_work(GEOMETRY, AMOUNT);
+}				
 				result = WORK_COMPLETED;
 			}
 		}
@@ -215,7 +229,7 @@ GET_COMPLETE_WORK(#code
 // Imports
 /////////////////////////////
 
-#import "Basic"()(ENABLE_ASSERT=INTERNAL);
+#import "Basic"()(ENABLE_ASSERT=ASSERT);
 #import "Common";
 #import "Allocator";
 #import "Random";
@@ -223,7 +237,7 @@ GET_COMPLETE_WORK(#code
 	WorkAvailable    =WorkAvailable,
 	WorkCompleted    =WorkCompleted,
 	MAX_THREAD_COUNT =MAX_THREAD_COUNT,
-	THREAD_QUEUE_SIZE=100000,
+	THREAD_QUEUE_SIZE=256,
 	CACHE_LINE_SIZE  =CACHE_LINE_SIZE,
 	INTERNAL         =INTERNAL,
 	LOGGING          =LOGGING,

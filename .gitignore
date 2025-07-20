@@ -11,3 +11,4 @@ globals.js
 *.o
 
 jai/linux
+test.jai
