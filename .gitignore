@@ -9,6 +9,7 @@ globals.js
 *.rdi
 *.rdbg
 *.o
+*.csv
 
 jai/linux
 test.jai

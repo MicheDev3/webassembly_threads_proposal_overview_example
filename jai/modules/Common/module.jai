@@ -61,9 +61,9 @@ Statistics :: struct
 	avg:   u64;
 	max:   u64;
 	
-	count: u64;
-	
 	std_dev: u64;
+	
+	datapoints: Buffer(u64);
 }
 
 /////////////////////////////
@@ -316,30 +316,27 @@ reset_stats :: inline (stats: *Statistics)
 	stats.min = 0xffff_ffff_ffff_ffff;
 	stats.avg = 0;
 	stats.max = 0;
+}
+
+perform_statistics :: (stats: *Statistics)
+{
+	for stats.datapoints
+	{
+		if it < stats.min stats.min = it;
+		if it > stats.max stats.max = it;
+		stats.avg += it;
+	}
 	
-	stats.count = 0;
-}
-
-compute_stats :: inline (stats: *Statistics, elapsed: u64)
-{
-	if elapsed < stats.min stats.min = elapsed;
-	if elapsed > stats.max stats.max = elapsed;
-	stats.avg += elapsed;
-
-	stats.count += 1;
-}
-
-finalize_stats :: inline (stats: *Statistics, datapoints: []u64)
-{
-	stats.avg = stats.avg/stats.count;
+	count := cast(u64)stats.datapoints.stored;
+	stats.avg = stats.avg/count;
 	
 	std_dev: float64;
-	for datapoints
+	for stats.datapoints
 	{
 		std_dev += square(cast(float64)it - cast(float64)stats.avg);
 	}
 	
-	std_dev /= stats.count;
+	std_dev /= count;
 	std_dev = sqrt(std_dev);
 	
 	stats.std_dev = cast(u64)std_dev;

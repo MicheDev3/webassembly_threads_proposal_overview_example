@@ -64,10 +64,6 @@ struct
 	running: bool;
 	
 	// TODO: Have some kind of debug info
-#if INTERNAL
-{
-	stats: Statistics;
-}
 
 });
 
@@ -146,12 +142,6 @@ init_thread :: inline (index: s64, arena: *ArenaAllocator)
 	start(*thread.available_mutex);
 	start(*thread.completed_mutex);
 	reserve(*thread.available, THREAD_QUEUE_SIZE,, thread.allocator);
-	
-#if INTERNAL
-{
-	reset_stats(*thread.stats);
-}
-
 }
 
 // TODO: Implement work stealing
@@ -200,14 +190,7 @@ run_thread :: (index: s64)
 		close(*thread.available_mutex);
 		close(*thread.completed_mutex);
 		
-#if INTERNAL
-{
-		write_message("Thread(%): terminated after completing % works\n", index, thread.stats.count);
-}
-else
-{
 		write_message("Thread(%): terminated\n", index);
-}
 			
 		SHUTDOWN();
 
@@ -229,17 +212,7 @@ PUSH_LOCK(*thread.available_mutex, #code
 		work = entry.*;
 });
 
-#if INTERNAL
-{
-		start := inline GetCurrentTimestamp();
-}
 		inline ProcessAvailableWork(*work);
-
-#if INTERNAL
-{
-		end := inline GetCurrentTimestamp();
-		compute_stats(*thread.stats, end - start);
-}
 
 		write_message("Thread(%): work '%' executed\n", index, work);
 
@@ -317,25 +290,6 @@ write_message :: inline (#discard format: string, #discard args: ..Any)
 toggle_logging :: inline ()
 {
 
-}
-
-}
-
-print_thread_group_stats :: ()
-{
-
-#if INTERNAL
-{
-	for *thread: THREAD_GROUP.threads
-	{
-		stats := *thread.stats;
-		print("Thread(%) completed % works\n", thread.index, stats.count);
-		print("    - min = %\n", stats.min);
-		print("    - avg = %\n", stats.avg / stats.count);
-		print("    - max = %\n", stats.max);
-		
-		reset_stats(stats);
-	}
 }
 
 }

@@ -180,6 +180,13 @@ platform_fini_threads :PlatformFiniThreads: (threads: Block(PlatformThread))
 main :: ()
 {
 	page_size := KIBIBYTES(4);
+	main_memory_size   := align_forward(MAIN_MEMORY_SIZE  , page_size);
+	temp_memory_size   := align_forward(TEMP_MEMORY_SIZE  , page_size);
+	thread_memory_size := align_forward(THREAD_MEMORY_SIZE, page_size);
+	
+	allocator: ArenaAllocator;
+	init_arena(*allocator, main_memory_size, temp_memory_size);
+	context.allocator.data = *allocator;
 	
 	// NOTE: Leave 1 to the os
 	core_count := cast(u32)get_nprocs() - 1;
@@ -191,17 +198,51 @@ main :: ()
 	// NOTE: excluding the processor running the main thread
 	thread_count := core_count - 1;
 	
-	seed := cast(u64)(current_time_monotonic().high);
+	now := current_time_monotonic();
+	time_to_string :: (using ct: Calendar_Time) -> string
+	{
+		date_part :: #bake_arguments formatInt(minimum_digits = 2);
+		
+		timezone_name := ifx ct.time_zone == .UTC then "Z" else ""; // @Incomplete: Maybe determine local time zone name or offset
+		
+		time_string := tprint("%_%_%T%_%_%", year, date_part(month_starting_at_0 + 1), date_part(day_of_month_starting_at_0 + 1), date_part(hour), date_part(minute), date_part(second),, allocation=allocation(.Temp));
+
+		return time_string;
+	}
+
+	today := time_to_string(to_calendar(current_time_consensus()));
 	
 	entropy: Random_State;
-	random_seed(*entropy, seed);
+	random_seed(*entropy, cast(u64)(now.high));
 	
-	print_test_configurations(thread_count);
+	print_test_configurations(today, thread_count);
 	
-	single_threaded_stats := single_threaded_test(*entropy,               page_size);
-	multi\_threaded_stats := multi\_threaded_test(*entropy, thread_count, page_size);
+	single_threaded_stats := single_threaded_test(*entropy);
+	multi\_threaded_stats := multi\_threaded_test(*entropy, thread_count, thread_memory_size, temp_memory_size);
+	assert(single_threaded_stats.datapoints.stored == multi\_threaded_stats.datapoints.stored);
 	
 	print("Average gain: %\n", (single_threaded_stats.avg - multi\_threaded_stats.avg) /  multi\_threaded_stats.avg,, allocation=allocation(.Temp));
+
+#if PRINT_CSV_DATAPOINTS
+{
+	print("Writting csv datapoints...\n",, allocation=allocation(.Temp));
+
+	csv: String_Builder;
+	filename := tprint("%_stats_%.csv", POINT_COUNT, today,, allocation=allocation(.Temp));
+	
+	print_to_builder(*csv, "single, multi\n",, allocation=allocation(.Temp));
+	for 0..single_threaded_stats.datapoints.stored-1
+	{
+		single_datapoint := single_threaded_stats.datapoints[it];
+		multi\_datapoint := multi\_threaded_stats.datapoints[it];
+		
+		print_to_builder(*csv, "%, %\n", single_datapoint, multi\_datapoint,, allocation=allocation(.Temp));
+	}
+	
+	content := builder_to_string(*csv, do_reset=false,, allocation=allocation(.Temp));
+
+	write_entire_file(filename, content);
+}
 	
 	return;
 }
@@ -217,6 +258,7 @@ main :: ()
 #import "Allocator";
 #import "Basic"()(ENABLE_ASSERT=ASSERT);
 #import "Common";
+#import "File";
 #import "Machine_X64";
 #import "Random";
 #if SIMD
