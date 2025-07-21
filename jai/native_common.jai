@@ -18,8 +18,8 @@ LOGGING    :: false;
 POINT_COUNT :: 1_000_004;
 POINTS_PER_THREAD :: 10_000;
 
-SPLIT_POINTS_BY_THREAD :: false;
-POINTS_IN_SINGLE_CHUNK :: false;
+SPLIT_POINTS_BY_THREADS :: false;
+POINTS_IN_SINGLE_CHUNK  :: false;
 
 SOA :: true;
 
@@ -31,7 +31,7 @@ AVX  :: false;
 
 // NOTE: By default RUN_CHECK_GEOMETRY_WORK is disable as it will decrease performance
 // quite a lot. I think because it is polluting the cache?
-RUN_CHECK_GEOMETRY_WORK :: false;
+RUN_CHECK_GEOMETRY_WORK :: true;
 PRINT_CSV_DATAPOINTS    :: false;
 
 /////////////////////////////
@@ -119,7 +119,7 @@ multi_threaded_test :: (entropy: *Random_State, worker_count: u32) -> Statistics
 		return .{};
 	}
 
-#if SPLIT_POINTS_BY_THREAD
+#if SPLIT_POINTS_BY_THREADS
 {	
 	work_count: s64 = worker_count;
 	
@@ -143,7 +143,6 @@ else
 	
 #if !POINTS_IN_SINGLE_CHUNK
 {
-
 	geometries := make_geometries(work_count, points, rest, CACHE_LINE_SIZE);
 }
 else
@@ -176,7 +175,7 @@ else
 else
 {
 		datapoint := insert(*result.datapoints);
-		datapoint.* = compute_work(*geometry, work_count, points, rest, amount);
+		datapoint.* = compute_work(geometry, work_count, points, rest, amount);
 }
 		
 		reset_temporary_storage();
@@ -223,7 +222,7 @@ GET_COMPLETE_WORK(#code
 	return result;
 }
 
-compute_work :: inline (geometry: *Geometry, thread_count: s64, points: s64, rest: s64, amount: float) -> u64
+compute_work :: inline (geometry: Geometry, thread_count: s64, points: s64, rest: s64, amount: float) -> u64
 {
 	current, target: WorkCompleted;
 	push_geometry_work(geometry, *target, thread_count, points, rest, amount);
@@ -263,6 +262,7 @@ print_test_configurations :: (now: string, thread_count: u32)
 	print("    - iterations:              %\n", ITERATIONS              ,, temp);
 	print("    - point count:             %\n", POINT_COUNT             ,, temp);
 	print("    - points per thread:       %\n", POINTS_PER_THREAD       ,, temp);
+	print("    - split points by threads: %\n", SPLIT_POINTS_BY_THREADS ,, temp);
 	print("    - points in single array:  %\n", POINTS_IN_SINGLE_CHUNK  ,, temp);
 	print("    - run check geometry work: %\n", RUN_CHECK_GEOMETRY_WORK ,, temp);
 	print("    - print csv datapoints:    %\n", PRINT_CSV_DATAPOINTS    ,, temp);

@@ -1,3 +1,7 @@
+/*
+	Improvements:
+		- The MutexTicket seems not yet 100% correct (maybe I need fences?). Keep testing
+*/
 
 #module_parameters () (
 	LLVM: bool = true

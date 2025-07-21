@@ -60,6 +60,8 @@ Geometry :: struct
 {
 	p: Block(Vector3);
 	n: Block(Vector3);
+	
+	count: s64;
 }
 
 }
@@ -127,48 +129,52 @@ UPDATE_GEOMETRY :: () #expand
 	amount: *f32 = ALLOCATE(LANES,, temp);
 	for 0..LANES-1 { amount[it] = `amount; }
 	
-	px: *f32 = ALLOCATE(LANES,, temp);
-	py: *f32 = ALLOCATE(LANES,, temp);
-	pz: *f32 = ALLOCATE(LANES,, temp);
+	tx: *f32 = ALLOCATE(LANES,, temp);
+	ty: *f32 = ALLOCATE(LANES,, temp);
+	tz: *f32 = ALLOCATE(LANES,, temp);
 }
 else
 {
 	amount := make_lane(`amount);
 
-	px: Lane = ---; py: Lane = ---; pz: Lane = ---;
+	tx: Lane = ---; ty: Lane = ---; tz: Lane = ---;
 }
 
-	count: s64;
-	offset := (count*LANES);
 	iterations := (`geometry.count / LANES);
-	while count < iterations
+	
+	px := `geometry.p.x.data; nx := `geometry.n.x.data;
+	py := `geometry.p.y.data; ny := `geometry.n.y.data;
+	pz := `geometry.p.z.data; nz := `geometry.n.z.data;
+
+	for 0..iterations-1
 	{
 #if DYNAMIC_MEMORY
 {
-		mulps(px, `geometry.n.x.data + offset, amount);
-		mulps(py, `geometry.n.y.data + offset, amount);
-		mulps(pz, `geometry.n.z.data + offset, amount);
+		mulps(tx, nx, amount);
+		mulps(ty, ny, amount);
+		mulps(tz, nz, amount);
 
-		addps(`geometry.p.x.data + offset, px);
-		addps(`geometry.p.y.data + offset, py);
-		addps(`geometry.p.z.data + offset, pz);
+		addps(px, tx);
+		addps(py, ty);
+		addps(pz, tz);
 }
 else
 {
-		mulps(px.data, `geometry.n.x.data + offset, amount.data);
-		mulps(py.data, `geometry.n.y.data + offset, amount.data);
-		mulps(pz.data, `geometry.n.z.data + offset, amount.data);
+		mulps(tx.data, nx, amount.data);
+		mulps(ty.data, ny, amount.data);
+		mulps(tz.data, nz, amount.data);
 
-		addps(`geometry.p.x.data + offset, px.data);
-		addps(`geometry.p.y.data + offset, py.data);
-		addps(`geometry.p.z.data + offset, pz.data);
+		addps(px, tx.data);
+		addps(py, ty.data);
+		addps(pz, tz.data);
 }
 		
-		count += 1;
-		offset = (count*LANES);
+		px += LANES; nx += LANES;
+		py += LANES; ny += LANES;
+		pz += LANES; nz += LANES;
 	}
 
-	for count*LANES..`geometry.count-1
+	for iterations*LANES..`geometry.count-1
 	{
 		`geometry.p.x[it] = `geometry.n.x[it]*`amount;
 		`geometry.p.y[it] = `geometry.n.y[it]*`amount;
@@ -201,16 +207,12 @@ UPDATE_GEOMETRY :: () #expand
 	
 	a := make_lane(`amount);
 	
-	count: s64;
-	offset := (count*LANES);
-	iterations := (`geometry.p.count / LANES);
-	while count < iterations
-	{
-		defer count += 1;
-		
-		p := `geometry.p.data + (count*LANES);
-		n := `geometry.n.data + (count*LANES);
-		
+	iterations := (`geometry.count / LANES);
+	
+	p := `geometry.p.data; n := `geometry.n.data;
+
+	for 0..iterations-1
+	{	
 		px: Lane = .[p[0].x, p[1].x, p[2].x, p[3].x];
 		py: Lane = .[p[0].y, p[1].y, p[2].y, p[3].y];
 		pz: Lane = .[p[0].z, p[1].z, p[2].z, p[3].z];
@@ -232,8 +234,12 @@ UPDATE_GEOMETRY :: () #expand
 		p[2] = .{px[2], py[2], pz[2]};
 		p[3] = .{px[3], py[3], pz[3]};
 		
-		count += 1;
-		offset = (count*LANES);
+		p += LANES; n += LANES;
+	}
+	
+	for iterations*LANES..`geometry.count-1
+	{
+		`geometry.p[it] = `geometry.n[it]*`amount;
 	}
 }
 else
@@ -276,8 +282,9 @@ make_geometry :: inline (count: s64, alignment: s64 = 4) -> Geometry
 }
 else
 {
-	reserve(*result.p, count,, allocation=allocation(alignment));
-	reserve(*result.n, count,, allocation=allocation(alignment, ~.ClearToZero));
+	result.count = count;
+	reserve(*result.p, result.count,, allocation=allocation(alignment));
+	reserve(*result.n, result.count,, allocation=allocation(alignment, ~.ClearToZero));
 	
 	for *result.n { it.* = .{1, 1, 1}; }
 }

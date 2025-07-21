@@ -1,3 +1,4 @@
+
 #module_parameters () (
 	WorkAvailable: Type = void,
 	WorkCompleted: Type = void,
@@ -159,7 +160,6 @@ PUSH_LOCK(*thread.available_mutex, #code
 {
 	entry := insert(*thread.available);
 	entry.* = work;
-	
 });
 
 	write_message("ThreadGroup: '%' added to Thread(%)\n", work, thread.index);
