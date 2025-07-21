@@ -145,7 +145,7 @@ make_arena :: inline (size: s64) -> MemoryArena
 	memory := VirtualAlloc(null, cast(u64)size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 	assert(memory != null);
 	
-	result: MemoryArena = .{memory, size, 0, 0};
+	result: MemoryArena = .{memory, size, 0};
 	
 	return result;
 }
@@ -162,6 +162,7 @@ win64_thread_proc :: (params: *void) -> u32 #c_call
 	
 	context.temporary_storage = New(Temporary_Storage);
 	set_initial_data(context.temporary_storage, TEMP_MEMORY_SIZE, ALLOCATE(TEMP_MEMORY_SIZE));
+	context.temporary_storage.overflow_allocator = context.allocator;
 	
 	run_thread(thread.index);
 	
@@ -179,7 +180,7 @@ platform_init_threads :PlatformInitThreads: (thread_count: u32) -> bool, Block(P
 		thread := New(PlatformThread);
 		thread.index = it;
 		thread.arena = make_arena(THREAD_MEMORY_SIZE + TEMP_MEMORY_SIZE);
-		init_thread(thread.index);
+		init_thread(thread.index,, Allocator.{allocator_proc, *thread.arena});
 		
 		ignored: s32;
 		handle := _beginthreadex(null, 0, cast(*void)win64_thread_proc, thread, REALTIME_PRIORITY_CLASS, *ignored);
@@ -214,6 +215,7 @@ main :: ()
 	
 	arena := make_arena(MAIN_MEMORY_SIZE);
 	context.allocator.data = *arena;
+	context.temporary_storage.overflow_allocator = context.allocator;
 	
 	// NOTE: Leave 1 to the os
 	core_count := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) - 1;
@@ -245,28 +247,48 @@ main :: ()
 	multi\_threaded_stats := multi\_threaded_test(*entropy, thread_count);
 	assert(single_threaded_stats.datapoints.stored == multi\_threaded_stats.datapoints.stored);
 	
-	print("Average gain: %\n", (single_threaded_stats.avg - multi\_threaded_stats.avg) /  multi\_threaded_stats.avg,, temp);
+	avg_gain := (cast(s64)single_threaded_stats.avg - cast(s64)multi\_threaded_stats.avg) /  cast(s64)multi\_threaded_stats.avg;
 
 #if PRINT_CSV_DATAPOINTS
 {
+	print("Average gain: %\n", avg_gain,, temp);
 	print("Writting csv datapoints...\n",, temp);
 
-	csv: String_Builder;
-	csv.allocator = temp;
+	builder: String_Builder;
+	builder.allocator = temp;
 	
-	print_to_builder(*csv, "single, multi\n",, temp);
+	print_to_builder(*builder, "single, multi\n",, temp);
 	for 0..single_threaded_stats.datapoints.stored-1
 	{
 		single_datapoint := single_threaded_stats.datapoints[it];
 		multi\_datapoint := multi\_threaded_stats.datapoints[it];
 		
-		print_to_builder(*csv, "%, %\n", single_datapoint, multi\_datapoint,, temp);
+		print_to_builder(*builder, "%, %\n", single_datapoint, multi\_datapoint,, temp);
 	}
 	
-	content := builder_to_string(*csv, do_reset=false,, temp);
+	content := builder_to_string(*builder, do_reset=false,, temp);
 	filename := tprint("%_stats_%.csv", POINT_COUNT, today);
 
 	write_entire_file(filename, content);
+}
+else
+{
+	builder: String_Builder;
+	builder.allocator = temp;
+	
+	print_to_builder(*builder, "Datapoints:\n",, temp);
+	for 0..single_threaded_stats.datapoints.stored-1
+	{
+		single_datapoint := single_threaded_stats.datapoints[it];
+		multi\_datapoint := multi\_threaded_stats.datapoints[it];
+		
+		gain := (cast(s64)single_datapoint - cast(s64)multi\_datapoint) / cast(s64)multi\_datapoint;
+		
+		print_to_builder(*builder, "%: %, % = %\n", FormatInt.{value=it, minimum_digits=4}, single_datapoint, multi\_datapoint, gain,, temp);
+	}
+	
+	print(builder_to_string(*builder, do_reset=false,, temp),, temp);
+	print("Average gain: %\n", avg_gain,, temp);
 }
 	
 	return;

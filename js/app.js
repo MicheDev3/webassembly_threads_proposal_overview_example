@@ -111,9 +111,6 @@ async function load_wasm_binary()
 					}
 					worker.onerror   = (err)=>{console.log('something wrong happened with the worker');console.error(err);}
 				}
-
-
-
 			}
 		).catch( (err)     => { console.error(err); } );
 	}

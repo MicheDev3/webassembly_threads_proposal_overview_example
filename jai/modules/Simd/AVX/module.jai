@@ -52,7 +52,7 @@ make_lane :: inline (value: float32) -> Lane
 	return result;
 }
 
-addps :: inline (lhs: *float, rhs: *float32) #no_abc #no_aoc
+addps :: inline (lhs: *float32, rhs: *float32) #no_abc #no_aoc
 {
 	#asm AVX, AVX2
 	{
@@ -65,7 +65,7 @@ addps :: inline (lhs: *float, rhs: *float32) #no_abc #no_aoc
 	}
 }
 
-addps :: inline (dst: *float, lhs: *float, rhs: *float32) #no_abc #no_aoc
+addps :: inline (dst: *float32, lhs: *float32, rhs: *float32) #no_abc #no_aoc
 {
 	#asm AVX, AVX2
 	{
@@ -78,7 +78,7 @@ addps :: inline (dst: *float, lhs: *float, rhs: *float32) #no_abc #no_aoc
 	}
 }
 
-mulps :: inline (lhs: *float, rhs: *float32) #no_abc #no_aoc
+mulps :: inline (lhs: *float32, rhs: *float32) #no_abc #no_aoc
 {
 	#asm AVX, AVX2
 	{
@@ -91,7 +91,7 @@ mulps :: inline (lhs: *float, rhs: *float32) #no_abc #no_aoc
 	}
 }
 
-mulps :: inline (dst: *float, lhs: *float, rhs: *float32) #no_abc #no_aoc
+mulps :: inline (dst: *float32, lhs: *float32, rhs: *float32) #no_abc #no_aoc
 {
 	#asm AVX, AVX2
 	{

@@ -3,6 +3,15 @@
 // Constants
 /////////////////////////////
 
+#scope_file
+
+USE_MEMSET :: false;
+
+MIN_ALIGNMENT :: 4;
+MAX_ALIGNMENT :: 128;
+
+#scope_export
+
 /////////////////////////////
 
 
@@ -12,7 +21,7 @@
 
 #scope_file
 
-NULL_ARENA: MemoryArena = .{null, -1, -1, -1};
+NULL_ARENA: MemoryArena = .{null, -1, -1};
 
 #scope_export
 
@@ -22,6 +31,15 @@ NULL_ARENA: MemoryArena = .{null, -1, -1, -1};
 /////////////////////////////
 // Enums
 /////////////////////////////
+
+#scope_file
+
+AllocationFlags :: enum_flags
+{
+    ClearToZero;
+}
+
+#scope_export
 
 /////////////////////////////
 
@@ -35,6 +53,11 @@ NULL_ARENA: MemoryArena = .{null, -1, -1, -1};
 Allocation :: struct
 {
 	alignment: s64;
+
+	flags: AllocationFlags;
+	
+	alignment = 4;
+	flags     = .ClearToZero;
 }
 
 #scope_export
@@ -44,8 +67,6 @@ MemoryArena :: struct
 	base: *u8;
 	size: s64;
 	used: s64;
-	
-	watermark: s64;
 }
 
 /////////////////////////////
@@ -78,7 +99,7 @@ operator == :: inline (lhs: MemoryArena, rhs: MemoryArena) -> bool
 // Context
 /////////////////////////////
 
-#add_context allocation: Allocation = .{4};
+#add_context allocation: Allocation;
 
 /////////////////////////////
 
@@ -123,15 +144,29 @@ allocator_proc ::
 	{
 		case .ALLOCATE;
 		{
+			flags     := context.allocation.flags;
 			alignment := context.allocation.alignment;
+			assert(alignment >= MIN_ALIGNMENT && alignment <= MAX_ALIGNMENT);
 			// NOTE: Makinkg sure alignment is a power of two
 			assert((alignment & ~(alignment - 1)) == alignment);
-			assert(alignment <= 128);
 			
 			arena.used = align_forward(arena.used, alignment);
-			 
+			
+			size := align_forward(requested_size, alignment);
 			result := arena.base + arena.used;
-			arena.used += align_forward(requested_size, alignment);
+			arena.used += size;
+			
+			if flags & .ClearToZero
+			{
+#if OS == .WASM || USE_MEMSET
+{
+				memset(result, 0, size);
+}
+else
+{
+				clear_to_zero(result, size);
+}
+			}
 			
 			assert(arena.used <= arena.size);
 			
@@ -170,13 +205,34 @@ allocator_proc ::
 	}
 }
 
-allocation :: inline (alignment: s64 = 4) -> Allocation
+allocation :: inline (alignment: s64 = 4, flags: AllocationFlags = .ClearToZero) -> Allocation
 {
 	result: Allocation;
 	result.alignment = alignment;
+	result.flags = flags;
 	
 	return result;
 }
+
+#scope_file
+
+// TODO: Does using movnti make sense? https://www.felixcloutier.com/x86/movnti
+clear_to_zero :: inline (dst: *void, size: s64)
+{
+	zero := 0;
+	end := dst + size;
+	while dst != end
+	{
+		#asm
+		{
+			movnt.d [dst], zero;
+			
+			add dst, 4;
+		}
+	}
+}
+
+#scope_export
 
 /////////////////////////////
 

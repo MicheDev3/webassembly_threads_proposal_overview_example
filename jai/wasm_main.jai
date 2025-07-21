@@ -103,7 +103,7 @@ carve_memory_block :: (
 make_arena :: inline (index: s64, thread_count: s64) -> MemoryArena
 {
 	block := carve_memory_block(index, thread_count, WORKER_NR_OF_PAGES);
-	result: MemoryArena = .{block.base, block.size, 0, 0};
+	result: MemoryArena = .{block.base, block.size, 0};
 	
 	return result;
 }

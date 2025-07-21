@@ -120,22 +120,49 @@ UPDATE_GEOMETRY :: () #expand
 	// TODO: Fix AVX
 	#assert(AVX == false);
 	
-	a := make_lane(`amount);
+	// TODO: Why is DYNAMIC_MEMORY slower? 
+	DYNAMIC_MEMORY :: 0;
+#if DYNAMIC_MEMORY
+{
+	amount: *f32 = ALLOCATE(LANES,, temp);
+	for 0..LANES-1 { amount[it] = `amount; }
 	
+	px: *f32 = ALLOCATE(LANES,, temp);
+	py: *f32 = ALLOCATE(LANES,, temp);
+	pz: *f32 = ALLOCATE(LANES,, temp);
+}
+else
+{
+	amount := make_lane(`amount);
+
+	px: Lane = ---; py: Lane = ---; pz: Lane = ---;
+}
+
 	count: s64;
 	offset := (count*LANES);
 	iterations := (`geometry.count / LANES);
 	while count < iterations
-	{		
-		px: Lane = ---; py: Lane = ---; pz: Lane = ---;
+	{
+#if DYNAMIC_MEMORY
+{
+		mulps(px, `geometry.n.x.data + offset, amount);
+		mulps(py, `geometry.n.y.data + offset, amount);
+		mulps(pz, `geometry.n.z.data + offset, amount);
 
-		mulps(px.data, `geometry.n.x.data + offset, a.data);
-		mulps(py.data, `geometry.n.y.data + offset, a.data);
-		mulps(pz.data, `geometry.n.z.data + offset, a.data);
+		addps(`geometry.p.x.data + offset, px);
+		addps(`geometry.p.y.data + offset, py);
+		addps(`geometry.p.z.data + offset, pz);
+}
+else
+{
+		mulps(px.data, `geometry.n.x.data + offset, amount.data);
+		mulps(py.data, `geometry.n.y.data + offset, amount.data);
+		mulps(pz.data, `geometry.n.z.data + offset, amount.data);
 
 		addps(`geometry.p.x.data + offset, px.data);
 		addps(`geometry.p.y.data + offset, py.data);
 		addps(`geometry.p.z.data + offset, pz.data);
+}
 		
 		count += 1;
 		offset = (count*LANES);
@@ -236,9 +263,9 @@ make_geometry :: inline (count: s64, alignment: s64 = 4) -> Geometry
 	reserve(*result.p.x, count,, allocation=allocation(alignment));
 	reserve(*result.p.y, count,, allocation=allocation(alignment));
 	reserve(*result.p.z, count,, allocation=allocation(alignment));
-	reserve(*result.n.x, count,, allocation=allocation(alignment));
-	reserve(*result.n.y, count,, allocation=allocation(alignment));
-	reserve(*result.n.z, count,, allocation=allocation(alignment));
+	reserve(*result.n.x, count,, allocation=allocation(alignment, ~.ClearToZero));
+	reserve(*result.n.y, count,, allocation=allocation(alignment, ~.ClearToZero));
+	reserve(*result.n.z, count,, allocation=allocation(alignment, ~.ClearToZero));
 	
 	for 0..result.count-1
 	{
@@ -249,8 +276,8 @@ make_geometry :: inline (count: s64, alignment: s64 = 4) -> Geometry
 }
 else
 {
-	reserve(*result.p, count);
-	reserve(*result.n, count);
+	reserve(*result.p, count,, allocation=allocation(alignment));
+	reserve(*result.n, count,, allocation=allocation(alignment, ~.ClearToZero));
 	
 	for *result.n { it.* = .{1, 1, 1}; }
 }
@@ -280,7 +307,7 @@ else
 make_geometries :: inline (chunks: s64, count: s64, rest: s64, alignment: s64 = 4) -> Block(Geometry)
 {
 	result: Block(Geometry);
-	reserve(*result, chunks);
+	reserve(*result, chunks,, allocation=allocation(flags=~.ClearToZero));
 	for *result
 	{
 		it.* = make_geometry(

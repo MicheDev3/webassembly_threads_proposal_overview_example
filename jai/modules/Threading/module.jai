@@ -138,6 +138,7 @@ init_thread :: inline (index: s64)
 	start(*thread.semaphore);
 	start(*thread.available_mutex);
 	start(*thread.completed_mutex);
+	reserve(*thread.available, THREAD_QUEUE_SIZE);
 }
 
 // TODO: Implement work stealing
@@ -171,7 +172,6 @@ run_thread :: (index: s64)
 	assert(THREAD_GROUP.initted);
 
 	thread := *THREAD_GROUP.threads[index];
-	reserve(*thread.available, THREAD_QUEUE_SIZE);
 	thread.running = true;
 	write_message("Thread(%): starting\n", index);
 

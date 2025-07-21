@@ -199,8 +199,6 @@ ALLOCATE :: (size: s64) -> *void #expand
 
 FREE :: () #expand
 {
-	PUSH_ALLOCATOR_PARAMS(allocation(arena));
-	
 	context.allocator.proc(.FREE, 0, 0, null, context.allocator.data);
 }
 
